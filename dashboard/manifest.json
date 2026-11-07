@@ -1,0 +1,8 @@
+{
+  "name": "netease-cloud",
+  "label": "网易云音乐",
+  "description": "NetEase Cloud Music backend: search, playable urls, lyrics, QR login, playlists",
+  "icon": "Music",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}
