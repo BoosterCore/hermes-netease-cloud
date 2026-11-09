@@ -125,6 +125,28 @@ input[type=range].hermes-ncm-range::-webkit-slider-thumb{-webkit-appearance:none
 input[type=range].hermes-ncm-range:hover::-webkit-slider-thumb{background:var(--ui-accent)}
 .hermes-ncm-now{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 10px 8px}
 .hermes-ncm-nowcover{width:96px;height:96px;border-radius:8px;object-fit:cover;background:var(--chrome-action-hover)}
+/* 唱片化封面：黑胶沟槽盘 + 旋转的封面芯标 + 可选折角唱臂 */
+.hermes-ncm-vinyl{position:relative;border-radius:50%;flex-shrink:0;
+  background:repeating-radial-gradient(circle at 50% 50%,#101013 0 2px,#17171b 2px 3.2px),#0c0c0e;
+  box-shadow:0 4px 12px rgba(0,0,0,.45),inset 0 0 0 1px #26262c}
+.hermes-ncm-vinyl::before{content:'';position:absolute;inset:0;border-radius:50%;pointer-events:none;z-index:2;
+  background:conic-gradient(from 210deg,transparent 0 40%,rgba(255,255,255,.08) 46%,transparent 52% 100%)}
+.hermes-ncm-vinyl::after{content:'';position:absolute;left:50%;top:50%;width:6%;height:6%;margin:-3%;
+  border-radius:50%;background:#060608;box-shadow:0 0 0 2px #1d1d22;z-index:3}
+.hermes-ncm-vinyl-spin{position:absolute;inset:0;border-radius:50%;animation:hermes-ncm-spin 4.5s linear infinite}
+.hermes-ncm-vinyl[data-playing=false] .hermes-ncm-vinyl-spin{animation-play-state:paused}
+.hermes-ncm-vinyl img{position:absolute;left:27%;top:27%;width:46%;height:46%;border-radius:50%;object-fit:cover;
+  background:var(--chrome-action-hover);box-shadow:0 0 0 3px #0c0c0e,0 0 0 4px #2b2b31}
+@keyframes hermes-ncm-spin{to{transform:rotate(360deg)}}
+.hermes-ncm-vinyl-big{width:96px;height:96px}
+.hermes-ncm-vinyl-mini{width:28px;height:28px;
+  background:repeating-radial-gradient(circle at 50% 50%,#101013 0 1px,#17171b 1px 1.6px),#0c0c0e}
+.hermes-ncm-vinyl-mini img{left:24%;top:24%;width:52%;height:52%;box-shadow:0 0 0 2px #0c0c0e,0 0 0 3px #2b2b31}
+.hermes-ncm-vinyl-arm{position:absolute;right:-12%;top:-4%;width:58%;height:88%;z-index:4;
+  transform-origin:87% 10%;transition:transform 1s cubic-bezier(.4,0,.2,1);filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
+.hermes-ncm-vinyl-arm[data-playing=true]{transform:rotate(-6deg)}
+.hermes-ncm-vinyl-arm[data-playing=false]{transform:rotate(-34deg)}
+@media (prefers-reduced-motion: reduce){.hermes-ncm-vinyl-spin{animation:none}.hermes-ncm-vinyl-arm{transition:none}}
 .hermes-ncm-nowtitle{font-size:13px;color:var(--ui-text-primary);text-align:center;max-width:100%;overflow-wrap:anywhere}
 .hermes-ncm-nowmeta{font-size:11px;color:var(--ui-text-tertiary);text-align:center}
 `
@@ -226,14 +248,32 @@ function createPlayer(ctx) {
 
   // ---- audio spectrum (drives the status-bar visualiser) -----------------
   let audioCtx = null, analyser = null, visualSource = null, bins = null, visualBroken = false
+  let stalledFrames = 0, silentFrames = 0
+  const diagEvents = []
+  let diagTimer = 0
+  function flushDiag() {
+    diagTimer = 0
+    if (!diagEvents.length) return
+    const batch = diagEvents.splice(0)
+    void Promise.resolve(post('/diag', { events: batch })).catch(() => {})
+  }
+  function diag(tag, detail) {
+    // Packaged builds expose no renderer console — ship breadcrumbs to the
+    // backend (/diag -> data/viz-diag.json) so breakage is diagnosable offline.
+    try {
+      diagEvents.push({ t: new Date().toISOString().slice(11, 23), tag, ...(detail || {}) })
+      if (diagEvents.length >= 6) flushDiag()
+      else if (!diagTimer) diagTimer = setTimeout(flushDiag, 700)
+    } catch { /* diagnostics must never break playback */ }
+  }
   const corsCache = new Map()
   async function corsOk(url) {
     // The analyser mutes a CORS-tainted media element, so only wire it up for
     // CDNs that answer Access-Control-Allow-Origin. NetEase's do (verified
     // 2026-11); probe once per host with a 1-byte ranged GET and remember it.
     let host = ''
-    try { host = new URL(url).host } catch { return false }
-    if (corsCache.has(host)) return corsCache.get(host)
+    try { host = new URL(url).host } catch { diag('cors', { ok: false, why: 'bad url' }); return false }
+    if (corsCache.has(host)) { const cached = corsCache.get(host); diag('cors', { host, ok: cached, cached: true }); return cached }
     let ok = false
     try {
       const probe = await fetch(url, { headers: { Range: 'bytes=0-0' }, cache: 'no-store' })
@@ -241,10 +281,16 @@ function createPlayer(ctx) {
       void probe.body?.cancel?.()
     } catch { ok = false }
     corsCache.set(host, ok)
+    diag('cors', { host, ok })
     return ok
   }
   function ensureVisualiser() {
     if (!audio || visualBroken) return
+    document.addEventListener('pointerdown', () => {
+      // Any click is a user gesture — use it to wake a context stuck in
+      // 'suspended' (autoplay policy) so audio through the graph un-mutes.
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
+    }, true)
     try {
       if (!audioCtx) {
         const AC = window.AudioContext || window.webkitAudioContext
@@ -257,9 +303,12 @@ function createPlayer(ctx) {
         visualSource.connect(analyser)
         analyser.connect(audioCtx.destination)
         bins = new Uint8Array(analyser.frequencyBinCount)
+        diag('viz-wired', { state: audioCtx.state })
       }
-      if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => {})
-    } catch { visualBroken = true }
+      if (audioCtx.state === 'suspended') audioCtx.resume().then(
+        () => diag('ctx-resumed'),
+        e => diag('ctx-resume-rejected', { name: e && e.name }))
+    } catch (e) { visualBroken = true; diag('viz-create-failed', { name: e && e.name }) }
   }
   function rerouteForCors(clean) {
     // Visualiser already wired and this track lacks CORS -> detach the source
@@ -267,10 +316,38 @@ function createPlayer(ctx) {
     if (!visualSource || !analyser) return
     try { clean ? visualSource.connect(analyser) : visualSource.disconnect() } catch {}
   }
+  let nullFrames = 0
+  function diagNull(why) {
+    if (++nullFrames % 45 === 1) diag('spec-null', { why, ctx: audioCtx ? audioCtx.state : 'none', hasAnalyser: !!analyser, paused: !!(audio && audio.paused) })
+  }
   function readSpectrum() {
-    if (!analyser || !audioCtx || audioCtx.state !== 'running' || !audio || audio.paused) return null
+    if (!analyser || !audio || audio.paused || status.get() !== 'playing') { if (audio && !audio.paused) diagNull(analyser ? 'no-analyser' : 'no-graph'); return null }
+    if (!audioCtx || audioCtx.state !== 'running') {
+      diagNull('ctx-' + (audioCtx ? audioCtx.state : 'none'))
+      silentFrames = 0
+      if (++stalledFrames > 60) reviveUnwired()      // ~4s of playing on a dead context
+      return null
+    }
+    stalledFrames = 0
     analyser.getByteFrequencyData(bins)
+    // A tainted element routed through the graph outputs *digital zero* —
+    // 20s of absolute silence while claiming to play means it went deaf.
+    let energy = 0
+    for (let i = 0; i < bins.length; i++) energy += bins[i]
+    if (energy < 3) { if (++silentFrames > 300) reviveUnwired() } else silentFrames = 0
     return bins
+  }
+  function reviveUnwired() {
+    // Last resort, but it guarantees audible playback: rebuild a plain audio
+    // element with no Web Audio routing at all and reload the current track.
+    console.warn('[ncm] visualiser unusable -> rewiring plain audio')
+    diag('revive-unwired')
+    visualBroken = true
+    try { visualSource?.disconnect() } catch {}
+    const el = audio
+    if (el) { el.pause(); el.removeAttribute('src'); el.load() }
+    audio = null; analyser = null; visualSource = null
+    void loadTrack()
   }
 
   function ensureAudio() {
@@ -283,7 +360,7 @@ function createPlayer(ctx) {
     element.loop = mode.get() === 'one'
     // crossOrigin is decided per-track in loadTrack (CORS probe), because a
     // tainted element wired into the analyser graph would play *silent*.
-    element.addEventListener('play', () => { if (element.crossOrigin) ensureVisualiser() })
+    element.addEventListener('play', () => { diag('play', { crossOrigin: element.crossOrigin || 'none' }); if (element.crossOrigin) ensureVisualiser() })
     element.addEventListener('timeupdate', () => {
       pos.set(element.currentTime)
       if (element.currentTime > 30 && !element.paused) {
@@ -296,6 +373,8 @@ function createPlayer(ctx) {
     element.addEventListener('pause', () => { if (status.get() === 'playing') status.set('paused') })
     element.addEventListener('ended', () => next(true))
     element.addEventListener('error', () => {
+      console.warn('[ncm] audio error code=', element.error && element.error.code, 'crossOrigin=', element.crossOrigin)
+      diag('audio-error', { code: element.error && element.error.code, crossOrigin: element.crossOrigin || 'none' })
       if (element.dataset.ncmRetry !== '1' && element.dataset.ncmOriginal) {
         element.dataset.ncmRetry = '1'
         element.src = element.dataset.ncmOriginal
@@ -318,6 +397,7 @@ function createPlayer(ctx) {
     const row = currentRow()
     if (!row) return
     const token = ++generation
+    diag('load', { id: row.id })
     pos.set(0)
     dur.set(Math.round((row.duration || 0) / 1000))
     lyric.set({ id: row.id, lines: [] })
@@ -342,7 +422,7 @@ function createPlayer(ctx) {
     element.dataset.ncmOriginal = result.url
     element.src = playable
     dur.set(0)
-    try { await element.play() } catch { status.set('paused') }
+    try { await element.play() } catch (e) { diag('play-rejected', { name: e && e.name }); status.set('paused') }
   }
 
   async function loadLyric(id, token) {
@@ -463,15 +543,17 @@ function createPlayer(ctx) {
   })
 
   return { queue, status, error, pos, dur, volume, lyric, likedIds, account, open, showLyric,
-    rest, post, playFrom, next, previous, toggle, seek, setVolume, mute, cycleMode, toggleLike, refreshAccount, currentRow, mode, readSpectrum }
+    rest, post, playFrom, next, previous, toggle, seek, setVolume, mute, cycleMode, toggleLike, refreshAccount, currentRow, mode, readSpectrum, diag }
 }
 
 // ------------------------------------------------------------ components ---
 function MiniWave({ player }) {
   const status = useValue(player.status)
   const ref = useRef(null)
+  const loopRef = useRef(null)
   const active = status === 'playing'
   const width = 10, rows = 2
+  useEffect(() => { if (active) loopRef.current?.wake() }, [active])
   useEffect(() => {
     const node = ref.current
     if (!node) return
@@ -483,13 +565,17 @@ function MiniWave({ player }) {
     const motion = matchMedia('(prefers-reduced-motion: reduce)')
     const dotColumns = width * 2, dotRows = rows * 4
     const heights = new Float32Array(dotColumns)
+    let missFrames = 0, step = 0, tickN = 0
     const silent = () => heights.every(h => h <= 0.03)
     paint(0, blank)
     // Loop once, never re-created on status flips — pauses then decay smoothly.
     const loop = createBudgetedLoop(() => {
       if (motion.matches) { paint(1, blank); return }
-      const spectrum = player.status.get() === 'playing' ? player.readSpectrum() : null
+      const playing = player.status.get() === 'playing'
+      const spectrum = playing ? player.readSpectrum() : null
+      if (playing && ++tickN % 110 === 1) player.diag('viz-tick', { hasData: !!spectrum })
       if (spectrum) {
+        missFrames = 0
         const n = spectrum.length
         for (let x = 0; x < dotColumns; x++) {
           // Stretch the bass-heavy half of the bins across the whole grid so
@@ -501,15 +587,37 @@ function MiniWave({ player }) {
         }
       } else {
         for (let x = 0; x < dotColumns; x++) heights[x] *= 0.7
+        if (playing && ++missFrames > 22) {
+          if (missFrames === 23) player.diag('viz-fallback-marquee')
+          // Spectrum never arrived (probe failed / visualiser disabled) —
+          // fall back to the classic marquee so the bar still feels alive.
+          const cells = [...blank]
+          cells[Math.floor(step++ / 2) % width] = '⠒'
+          paint(1, cells)
+          return
+        }
         if (silent()) { paint(1, blank); return }
       }
       paint(1, brailleBars(heights, dotColumns, rows))
     }, { fps: 15, pauseWhenUnfocused: false, idleWhen: () => motion.matches
       || (player.status.get() !== 'playing' && silent()) })
-    return () => { loop.dispose(); motion.removeEventListener?.('change', () => {}) }
+    loopRef.current = loop
+    return () => { loop.dispose(); loopRef.current = null; motion.removeEventListener?.('change', () => {}) }
   }, [])
   return jsx('div', { ref, className: 'hermes-ncm-wave', style: { '--ncm-columns': width }, 'data-active': active, 'aria-hidden': true,
     children: [0, 1].map(layer => jsx('span', { className: 'hermes-ncm-wave-layer', children: Array(width * rows).fill('⠀').map((cell, i) => jsx('span', { children: cell }, i)) }, layer)) })
+}
+
+function VinylCover({ pic, playing, arm, size }) {
+  return jsxs('div', { className: `hermes-ncm-vinyl hermes-ncm-vinyl-${size}`, 'data-playing': playing, 'aria-hidden': true, children: [
+    jsx('div', { className: 'hermes-ncm-vinyl-spin', children: pic ? jsx('img', { src: pic, loading: 'lazy', alt: '' }) : null }),
+    arm ? jsx('svg', { className: 'hermes-ncm-vinyl-arm', 'data-playing': playing, viewBox: '0 0 60 80', children: [
+      jsx('path', { d: 'M52 8 L40 36 L23 57', fill: 'none', stroke: '#46464f', 'stroke-width': 3.5, 'stroke-linecap': 'round' }),
+      jsx('path', { d: 'M23 57 L19 65', fill: 'none', stroke: '#5c5c66', 'stroke-width': 5, 'stroke-linecap': 'round' }),
+      jsx('circle', { cx: 40, cy: 36, r: 2.6, fill: '#3b3b44' }),
+      jsx('circle', { cx: 52, cy: 8, r: 6, fill: '#23232a', stroke: '#4c4c56', 'stroke-width': 1.5 })
+    ] }) : null
+  ] })
 }
 
 function SongRow({ player, row, list, index }) {
@@ -532,7 +640,8 @@ function SongRow({ player, row, list, index }) {
     onClick: () => player.playFrom(list, index),
     onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); player.playFrom(list, index) } },
     children: [
-      row.pic ? jsx('img', { className: 'hermes-ncm-cover', src: row.pic, loading: 'lazy', alt: '' }) : jsx('span', { className: 'hermes-ncm-cover' }),
+      isCurrent ? jsx(VinylCover, { pic: row.pic, playing: status === 'playing', size: 'mini' })
+        : row.pic ? jsx('img', { className: 'hermes-ncm-cover', src: row.pic, loading: 'lazy', alt: '' }) : jsx('span', { className: 'hermes-ncm-cover' }),
       rowText,
       jsx('span', { className: 'hermes-ncm-duration', children: fmt(Math.round((row.duration || 0) / 1000)) }),
       jsx('button', { className: 'hermes-ncm-heart', 'data-on': liked.includes(row.id), 'aria-label': liked.includes(row.id) ? t('unlike') : t('like'),
@@ -857,11 +966,12 @@ function Footer({ player, ctx }) {
 function NowTab({ player, setTab }) {
   const t = usePluginI18n(ID)
   const queue = useValue(player.queue)
+  const status = useValue(player.status)
   const row = player.currentRow()
   if (!row) return jsx('div', { className: 'hermes-ncm-hint', children: t('noPlayingNow') })
   return jsxs('div', { children: [
     jsxs('div', { className: 'hermes-ncm-now', children: [
-      row.pic ? jsx('img', { className: 'hermes-ncm-nowcover', src: row.pic, alt: '' }) : null,
+      jsx(VinylCover, { pic: row.pic, playing: status === 'playing', arm: true, size: 'big' }),
       jsx('div', { className: 'hermes-ncm-nowtitle', children: row.name }),
       row.artists ? jsx('div', { className: 'hermes-ncm-nowmeta', children: row.artists }) : null
     ] }),
@@ -908,6 +1018,7 @@ function NcmBar({ player, ctx }) {
       jsx(PopoverContent, { side: 'top', align: 'end', className: 'hermes-ncm-panel', 'aria-label': t('netease'),
         children: jsx(Panel, { player, ctx }) })
     ] }),
+    jsx(Action, { label: t('prev'), icon: ic('SkipBack', '⏮'), onClick: () => player.previous() }),
     jsx(Action, { label: t(playing ? 'pause' : 'play'), icon: playing ? Pause : Play, busy: status === 'loading', onClick: player.toggle }),
     jsx(Action, { label: t('next'), icon: ic('SkipForward', '⏭'), onClick: () => player.next() }),
     row ? jsx(Action, { label: t(isLiked ? 'unlike' : 'like'), icon: ic('Heart', '♥'), pressed: isLiked,

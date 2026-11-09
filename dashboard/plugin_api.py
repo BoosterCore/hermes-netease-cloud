@@ -804,6 +804,34 @@ async def liked(limit: int = 200, mode: str = ""):
         return {"ok": False, "error": f"liked failed: {exc}"}
 
 
+@router.post("/diag")
+async def diag(request: Request):
+    """Visualiser breadcrumbs: packaged desktop builds expose no renderer
+    console to us, so the plugin POSTs its [ncm] events here and we keep the
+    latest tail on disk for offline debugging."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False, "error": "bad json"}
+    try:
+        events = body.get("events")
+        if not isinstance(events, list):
+            return {"ok": False, "error": "events?"}
+        path = _data_dir() / "viz-diag.json"
+        prev = []
+        try:
+            prev = json.loads(path.read_text(encoding="utf-8")).get("events", [])
+        except Exception:
+            pass
+        merged = (prev + events)[-60:]
+        path.write_text(
+            json.dumps({"updated": time.strftime("%F %T"), "events": merged}, ensure_ascii=False, indent=1),
+            encoding="utf-8")
+        return {"ok": True, "n": len(merged)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @router.post("/scrobble")
 async def scrobble(request: Request):
     try:

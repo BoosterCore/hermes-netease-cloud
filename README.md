@@ -40,6 +40,9 @@ spirit of the built-in Radio plugin.
 - 🔁 **Play modes**: list loop / single loop / shuffle
 - 🖥️ **Status bar**: mini controls on the bottom status bar (plus a live audio-spectrum
   dot visualiser) and a compact popover panel; follows the Hermes theme, no build step
+- 💿 **Vinyl player art**: the Now Playing cover spins as a black-groove record with an
+  articulated tonearm (drops on play, parks on pause); the current track shows as a mini
+  spinning disc in every list
 
 ## Install
 
