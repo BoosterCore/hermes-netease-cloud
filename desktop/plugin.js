@@ -2526,14 +2526,27 @@ function createPlayer(ctx) {
   // ---- audio spectrum (drives the status-bar visualiser) -----------------
   let audioCtx = null, analyser = null, visualSource = null, bins = null, visualBroken = false
   let stalledFrames = 0, silentFrames = 0
+  const diagEvents = []
+  let diagFlush = 0
+  function diag(tag, detail) {
+    // Packaged builds expose no renderer console — ship breadcrumbs to the
+    // backend (/diag -> data/viz-diag.json) so breakage is diagnosable offline.
+    try {
+      diagEvents.push({ t: new Date().toISOString().slice(11, 23), tag, ...(detail || {}) })
+      const now = Date.now()
+      if (diagEvents.length < 6 && now - diagFlush < 1200) return
+      diagFlush = now
+      void Promise.resolve(post('/diag', { events: diagEvents.splice(0) })).catch(() => {})
+    } catch { /* diagnostics must never break playback */ }
+  }
   const corsCache = new Map()
   async function corsOk(url) {
     // The analyser mutes a CORS-tainted media element, so only wire it up for
     // CDNs that answer Access-Control-Allow-Origin. NetEase's do (verified
     // 2026-11); probe once per host with a 1-byte ranged GET and remember it.
     let host = ''
-    try { host = new URL(url).host } catch { return false }
-    if (corsCache.has(host)) return corsCache.get(host)
+    try { host = new URL(url).host } catch { diag('cors', { ok: false, why: 'bad url' }); return false }
+    if (corsCache.has(host)) { const cached = corsCache.get(host); diag('cors', { host, ok: cached, cached: true }); return cached }
     let ok = false
     try {
       const probe = await fetch(url, { headers: { Range: 'bytes=0-0' }, cache: 'no-store' })
@@ -2541,6 +2554,7 @@ function createPlayer(ctx) {
       void probe.body?.cancel?.()
     } catch { ok = false }
     corsCache.set(host, ok)
+    diag('cors', { host, ok })
     return ok
   }
   function ensureVisualiser() {
@@ -2562,11 +2576,11 @@ function createPlayer(ctx) {
         visualSource.connect(analyser)
         analyser.connect(audioCtx.destination)
         bins = new Uint8Array(analyser.frequencyBinCount)
-        console.warn('[ncm] visualiser wired, ctx state =', audioCtx.state)
+        diag('viz-wired', { state: audioCtx.state })
       }
       if (audioCtx.state === 'suspended') audioCtx.resume().then(
-        () => console.warn('[ncm] ctx resumed'),
-        e => console.warn('[ncm] ctx resume rejected:', e && e.name))
+        () => diag('ctx-resumed'),
+        e => diag('ctx-resume-rejected', { name: e && e.name }))
     } catch { visualBroken = true }
   }
   function rerouteForCors(clean) {
@@ -2595,6 +2609,7 @@ function createPlayer(ctx) {
     // Last resort, but it guarantees audible playback: rebuild a plain audio
     // element with no Web Audio routing at all and reload the current track.
     console.warn('[ncm] visualiser unusable -> rewiring plain audio')
+    diag('revive-unwired')
     visualBroken = true
     try { visualSource?.disconnect() } catch {}
     const el = audio
@@ -2613,7 +2628,7 @@ function createPlayer(ctx) {
     element.loop = mode.get() === 'one'
     // crossOrigin is decided per-track in loadTrack (CORS probe), because a
     // tainted element wired into the analyser graph would play *silent*.
-    element.addEventListener('play', () => { if (element.crossOrigin) ensureVisualiser() })
+    element.addEventListener('play', () => { diag('play', { crossOrigin: element.crossOrigin || 'none' }); if (element.crossOrigin) ensureVisualiser() })
     element.addEventListener('timeupdate', () => {
       pos.set(element.currentTime)
       if (element.currentTime > 30 && !element.paused) {
@@ -2627,6 +2642,7 @@ function createPlayer(ctx) {
     element.addEventListener('ended', () => next(true))
     element.addEventListener('error', () => {
       console.warn('[ncm] audio error code=', element.error && element.error.code, 'crossOrigin=', element.crossOrigin)
+      diag('audio-error', { code: element.error && element.error.code, crossOrigin: element.crossOrigin || 'none' })
       if (element.dataset.ncmRetry !== '1' && element.dataset.ncmOriginal) {
         element.dataset.ncmRetry = '1'
         element.src = element.dataset.ncmOriginal
@@ -2649,6 +2665,7 @@ function createPlayer(ctx) {
     const row = currentRow()
     if (!row) return
     const token = ++generation
+    diag('load', { id: row.id })
     pos.set(0)
     dur.set(Math.round((row.duration || 0) / 1000))
     lyric.set({ id: row.id, lines: [] })
@@ -2666,7 +2683,6 @@ function createPlayer(ctx) {
     const element = ensureAudio()
     const playable = result.url.startsWith('http://') ? result.url.replace('http://', 'https://') : result.url
     const clean = await corsOk(playable)
-    console.warn('[ncm] cors probe:', clean)
     if (token !== generation || disposed) return
     element.crossOrigin = clean ? 'anonymous' : null
     rerouteForCors(clean)
@@ -2674,7 +2690,7 @@ function createPlayer(ctx) {
     element.dataset.ncmOriginal = result.url
     element.src = playable
     dur.set(0)
-    try { await element.play() } catch { status.set('paused') }
+    try { await element.play() } catch (e) { diag('play-rejected', { name: e && e.name }); status.set('paused') }
   }
 
   async function loadLyric(id, token) {
@@ -2795,7 +2811,7 @@ function createPlayer(ctx) {
   })
 
   return { queue, status, error, pos, dur, volume, lyric, likedIds, account, open, showLyric,
-    rest, post, playFrom, next, previous, toggle, seek, setVolume, mute, cycleMode, toggleLike, refreshAccount, currentRow, mode, readSpectrum }
+    rest, post, playFrom, next, previous, toggle, seek, setVolume, mute, cycleMode, toggleLike, refreshAccount, currentRow, mode, readSpectrum, diag }
 }
 
 // ------------------------------------------------------------ components ---
@@ -2837,6 +2853,7 @@ function MiniWave({ player }) {
       } else {
         for (let x = 0; x < dotColumns; x++) heights[x] *= 0.7
         if (playing && ++missFrames > 22) {
+          if (missFrames === 23) player.diag('viz-fallback-marquee')
           // Spectrum never arrived (probe failed / visualiser disabled) —
           // fall back to the classic marquee so the bar still feels alive.
           const cells = [...blank]
