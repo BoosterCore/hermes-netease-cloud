@@ -152,17 +152,21 @@ const CUSTOM_ICONS = {
 const ic = (name, glyph) => icons[name] || CUSTOM_ICONS[name]
   || function GlyphFallback() { return jsx('span', { className: 'hermes-ncm-glyph', children: glyph }) }
 
-function brailleBars(heights, dotColumns, rows = 2) {
-  // heights: 0..1 energy per dot column (dotColumns = charWidth*2). Bottom-up bars.
-  const cells = new Uint16Array((dotColumns / 2) * rows)
+function brailleTrace(samples, rows = 2) {
+  const width = samples.length / 2
+  const cells = Array(width * rows).fill(0)
   const dots = [[1, 2, 4, 64], [8, 16, 32, 128]]
-  const dotRows = rows * 4
-  for (let x = 0; x < dotColumns; x++) {
-    const lit = Math.max(0, Math.min(dotRows, Math.round(heights[x] * dotRows)))
-    for (let y = dotRows - lit; y < dotRows; y++)
-      cells[Math.floor(y / 4) * (dotColumns / 2) + Math.floor(x / 2)] |= dots[x % 2][y % 4]
-  }
-  return Array.from(cells, cell => cell ? String.fromCharCode(0x2800 | cell) : '⠀')
+  const center = (rows * 4 - 1) / 2
+  const row = value => Math.max(0, Math.min(rows * 4 - 1, Math.round(center - value * center)))
+  let previous = row(samples[0])
+  samples.forEach((value, x) => {
+    const y = row(value)
+    for (let point = Math.min(previous, y); point <= Math.max(previous, y); point++) {
+      cells[Math.floor(point / 4) * width + Math.floor(x / 2)] |= dots[x % 2][point % 4]
+    }
+    previous = y
+  })
+  return cells.map(cell => String.fromCharCode(0x2800 | cell))
 }
 
 const fmt = seconds => {
@@ -224,55 +228,6 @@ function createPlayer(ctx) {
   }
   const post = (path, body) => rest(path, { method: 'POST', body: body || {} })
 
-  // ---- audio spectrum (drives the status-bar visualiser) -----------------
-  let audioCtx = null, analyser = null, visualSource = null, bins = null, visualBroken = false
-  const corsCache = new Map()
-  async function corsOk(url) {
-    // The analyser mutes a CORS-tainted media element, so only wire it up for
-    // CDNs that answer Access-Control-Allow-Origin. NetEase's do (verified
-    // 2026-11); probe once per host with a 1-byte ranged GET and remember it.
-    let host = ''
-    try { host = new URL(url).host } catch { return false }
-    if (corsCache.has(host)) return corsCache.get(host)
-    let ok = false
-    try {
-      const probe = await fetch(url, { headers: { Range: 'bytes=0-0' }, cache: 'no-store' })
-      ok = probe.ok || probe.status === 206
-      void probe.body?.cancel?.()
-    } catch { ok = false }
-    corsCache.set(host, ok)
-    return ok
-  }
-  function ensureVisualiser() {
-    if (!audio || visualBroken) return
-    try {
-      if (!audioCtx) {
-        const AC = window.AudioContext || window.webkitAudioContext
-        if (!AC) { visualBroken = true; return }
-        audioCtx = new AC()
-        visualSource = audioCtx.createMediaElementSource(audio) // once per element
-        analyser = audioCtx.createAnalyser()
-        analyser.fftSize = 64                // 32 bins — plenty for a 20-column grid
-        analyser.smoothingTimeConstant = 0.55
-        visualSource.connect(analyser)
-        analyser.connect(audioCtx.destination)
-        bins = new Uint8Array(analyser.frequencyBinCount)
-      }
-      if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => {})
-    } catch { visualBroken = true }
-  }
-  function rerouteForCors(clean) {
-    // Visualiser already wired and this track lacks CORS -> detach the source
-    // so the element falls back to direct (audible) output. Reconnect later.
-    if (!visualSource || !analyser) return
-    try { clean ? visualSource.connect(analyser) : visualSource.disconnect() } catch {}
-  }
-  function readSpectrum() {
-    if (!analyser || !audioCtx || audioCtx.state !== 'running' || !audio || audio.paused) return null
-    analyser.getByteFrequencyData(bins)
-    return bins
-  }
-
   function ensureAudio() {
     if (audio) return audio
     const element = new Audio()
@@ -281,9 +236,6 @@ function createPlayer(ctx) {
     element.hidden = true
     element.volume = volume.get() / 100
     element.loop = mode.get() === 'one'
-    // crossOrigin is decided per-track in loadTrack (CORS probe), because a
-    // tainted element wired into the analyser graph would play *silent*.
-    element.addEventListener('play', () => { if (element.crossOrigin) ensureVisualiser() })
     element.addEventListener('timeupdate', () => {
       pos.set(element.currentTime)
       if (element.currentTime > 30 && !element.paused) {
@@ -333,14 +285,9 @@ function createPlayer(ctx) {
     }
     bus.postMessage({ type: 'play', sender: windowId })
     const element = ensureAudio()
-    const playable = result.url.startsWith('http://') ? result.url.replace('http://', 'https://') : result.url
-    const clean = await corsOk(playable)
-    if (token !== generation || disposed) return
-    element.crossOrigin = clean ? 'anonymous' : null
-    rerouteForCors(clean)
     element.dataset.ncmRetry = '0'
     element.dataset.ncmOriginal = result.url
-    element.src = playable
+    element.src = result.url.startsWith('http://') ? result.url.replace('http://', 'https://') : result.url
     dur.set(0)
     try { await element.play() } catch { status.set('paused') }
   }
@@ -457,13 +404,11 @@ function createPlayer(ctx) {
     disposed = true
     generation++
     try { bus.close() } catch {}
-    try { const c = audioCtx?.close?.(); if (c?.catch) c.catch(() => {}) } catch {}
-    audioCtx = null; analyser = null; bins = null
     if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); audio = null }
   })
 
   return { queue, status, error, pos, dur, volume, lyric, likedIds, account, open, showLyric,
-    rest, post, playFrom, next, previous, toggle, seek, setVolume, mute, cycleMode, toggleLike, refreshAccount, currentRow, mode, readSpectrum }
+    rest, post, playFrom, next, previous, toggle, seek, setVolume, mute, cycleMode, toggleLike, refreshAccount, currentRow, mode }
 }
 
 // ------------------------------------------------------------ components ---
@@ -481,33 +426,16 @@ function MiniWave({ player }) {
       if (layers[layer].children[i].textContent !== cell) layers[layer].children[i].textContent = cell
     })
     const motion = matchMedia('(prefers-reduced-motion: reduce)')
-    const dotColumns = width * 2, dotRows = rows * 4
-    const heights = new Float32Array(dotColumns)
-    const silent = () => heights.every(h => h <= 0.03)
+    let step = 0
     paint(0, blank)
-    // Loop once, never re-created on status flips — pauses then decay smoothly.
     const loop = createBudgetedLoop(() => {
-      if (motion.matches) { paint(1, blank); return }
-      const spectrum = player.status.get() === 'playing' ? player.readSpectrum() : null
-      if (spectrum) {
-        const n = spectrum.length
-        for (let x = 0; x < dotColumns; x++) {
-          // Stretch the bass-heavy half of the bins across the whole grid so
-          // kick drums visibly punch instead of only wiggling the left edge.
-          const f = Math.pow(x / (dotColumns - 1), 1.6)
-          const bin = Math.min(n - 1, Math.round(f * (n - 1)))
-          const target = Math.max(spectrum[bin], bin > 0 ? spectrum[bin - 1] * 0.7 : 0) / 255
-          heights[x] += (target - heights[x]) * (target > heights[x] ? 0.6 : 0.16)
-        }
-      } else {
-        for (let x = 0; x < dotColumns; x++) heights[x] *= 0.7
-        if (silent()) { paint(1, blank); return }
-      }
-      paint(1, brailleBars(heights, dotColumns, rows))
-    }, { fps: 15, pauseWhenUnfocused: false, idleWhen: () => motion.matches
-      || (player.status.get() !== 'playing' && silent()) })
+      if (!active || motion.matches) { paint(1, blank); return }
+      const cells = [...blank]
+      cells[Math.floor(step++ / 2) % width] = '⠒'
+      paint(1, cells)
+    }, { fps: 10, pauseWhenUnfocused: false, idleWhen: () => !active || motion.matches })
     return () => { loop.dispose(); motion.removeEventListener?.('change', () => {}) }
-  }, [])
+  }, [active])
   return jsx('div', { ref, className: 'hermes-ncm-wave', style: { '--ncm-columns': width }, 'data-active': active, 'aria-hidden': true,
     children: [0, 1].map(layer => jsx('span', { className: 'hermes-ncm-wave-layer', children: Array(width * rows).fill('⠀').map((cell, i) => jsx('span', { children: cell }, i)) }, layer)) })
 }
