@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 ### Added
 - The status-bar dots now dance to the **real audio spectrum**: the fake scrolling marquee is replaced by a live analyser (Web Audio) wired straight into the playing stream — bass hits punch through the dot grid, pauses decay smoothly.
 - Per-track CORS probe with automatic fallback: if a CDN ever stops sending `Access-Control-Allow-Origin`, playback stays audible and the visualiser quietly steps aside.
+- Visualiser self-heal: a dead audio chain (suspended context / tainted element) rebuilds a clean player automatically; the status bar falls back to the classic marquee when no spectrum is available.
+- Previous-track button on the status bar with official rewind semantics (>3s restarts the current track, ≤3s jumps to the previous).
+- Vinyl record player art: the Now Playing cover spins as a black-groove record with an articulated S-shaped tonearm that drops onto the record on play and parks off it on pause; the current track's thumbnail renders as a mini spinning disc in every list.
+- `/diag` breadcrumb route persists visualiser events to disk for troubleshooting.
 
 ### Changed
 - Visualiser loop rebuilt to survive pause/resume/track changes without re-creating the audio graph; AudioContext is closed on plugin dispose.
