@@ -31,7 +31,8 @@ spirit of the built-in Radio plugin.
 - ▶️ **Playback controls**: play / pause / previous / next, progress bar,
   volume — all in a consistent thin-outline style
 - 📜 **Scrolling synced lyrics** with the current line highlighted
-- ❤️ **Favorites**: heart / un-heart, and the "Liked Music" playlist
+- ❤️ **Favorites**: like / unlike right from the status bar (official-player
+  style ♥ toggle) or any song row, plus the "Liked Music" playlist
 - 📁 **My Playlists**: browse your own NetEase playlists and play them
   right inside the panel
 - 🔑 **Login**: QR code **or** paste your `MUSIC_U` cookie (QR login is often
@@ -89,11 +90,13 @@ NetEase Cloud Music app. If you see "检测到当前设备环境异常，本次�
 ```
 netease-cloud/
 ├── plugin.yaml            # Hermes plugin manifest
+├── CHANGELOG.md           # release history (EN; 中文: CHANGELOG.zh-CN.md)
 ├── dashboard/
 │   ├── manifest.json      # backend API declaration
-│   └── plugin_api.py      # FastAPI routes: search / recommend / url / lyric / login ...
+│   └── plugin_api.py      # FastAPI routes: search / recommend / url / lyric / like / login ...
 └── desktop/
-    └── plugin.js          # Desktop status-bar UI (single-file ESM, @hermes/plugin-sdk)
+    ├── src/               # canonical UI sources (plugin.src.js + qrlib.js)
+    └── plugin.js          # built status-bar UI (single-file ESM, @hermes/plugin-sdk)
 ```
 
 ## License

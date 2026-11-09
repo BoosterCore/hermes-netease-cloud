@@ -24,7 +24,7 @@
 - ✨ **推荐页**（需登录）：每日推荐（每天 30 首）、私人 FM、推荐歌单——含官方「私人雷达」
 - ▶️ **播放控制**：播放 / 暂停 / 上一首 / 下一首、进度条、音量（统一镂空细线风格）
 - 📜 **滚动歌词**：自动高亮当前行
-- ❤️ **收藏**：红心 / 取消红心、「喜欢的音乐」歌单
+- ❤️ **收藏**：状态栏一键红心（官方播放器同款点按切换）或任意歌曲行收藏 / 取消，「喜欢的音乐」歌单
 - 📁 **我的歌单**：浏览并直接在面板内播放自己的网易云歌单
 - 🔑 **登录**：扫码登录 **或** 粘贴 `MUSIC_U` Cookie（扫码常被网易风控拦截，Cookie 是最稳的兜底方案）
 - 🔁 **播放模式**：列表循环 / 单曲循环 / 随机播放
@@ -74,11 +74,13 @@ VIP 歌曲需要已登录的网易云 VIP 账号。
 ```
 netease-cloud/
 ├── plugin.yaml            # Hermes 插件清单
+├── CHANGELOG.md           # 版本变更记录（英文；中文见 CHANGELOG.zh-CN.md）
 ├── dashboard/
 │   ├── manifest.json      # 后端 API 声明
-│   └── plugin_api.py      # FastAPI 路由：search / recommend / url / lyric / login ...
+│   └── plugin_api.py      # FastAPI 路由：search / recommend / url / lyric / like / login ...
 └── desktop/
-    └── plugin.js          # 桌面状态栏 UI（单文件 ESM，@hermes/plugin-sdk）
+    ├── src/               # 界面源码（plugin.src.js + qrlib.js）
+    └── plugin.js          # 构建产出的状态栏 UI（单文件 ESM，@hermes/plugin-sdk）
 ```
 
 ## 许可
