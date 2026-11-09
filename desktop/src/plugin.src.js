@@ -125,6 +125,28 @@ input[type=range].hermes-ncm-range::-webkit-slider-thumb{-webkit-appearance:none
 input[type=range].hermes-ncm-range:hover::-webkit-slider-thumb{background:var(--ui-accent)}
 .hermes-ncm-now{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 10px 8px}
 .hermes-ncm-nowcover{width:96px;height:96px;border-radius:8px;object-fit:cover;background:var(--chrome-action-hover)}
+/* 唱片化封面：黑胶沟槽盘 + 旋转的封面芯标 + 可选折角唱臂 */
+.hermes-ncm-vinyl{position:relative;border-radius:50%;flex-shrink:0;
+  background:repeating-radial-gradient(circle at 50% 50%,#101013 0 2px,#17171b 2px 3.2px),#0c0c0e;
+  box-shadow:0 4px 12px rgba(0,0,0,.45),inset 0 0 0 1px #26262c}
+.hermes-ncm-vinyl::before{content:'';position:absolute;inset:0;border-radius:50%;pointer-events:none;z-index:2;
+  background:conic-gradient(from 210deg,transparent 0 40%,rgba(255,255,255,.08) 46%,transparent 52% 100%)}
+.hermes-ncm-vinyl::after{content:'';position:absolute;left:50%;top:50%;width:6%;height:6%;margin:-3%;
+  border-radius:50%;background:#060608;box-shadow:0 0 0 2px #1d1d22;z-index:3}
+.hermes-ncm-vinyl-spin{position:absolute;inset:0;border-radius:50%;animation:hermes-ncm-spin 4.5s linear infinite}
+.hermes-ncm-vinyl[data-playing=false] .hermes-ncm-vinyl-spin{animation-play-state:paused}
+.hermes-ncm-vinyl img{position:absolute;left:27%;top:27%;width:46%;height:46%;border-radius:50%;object-fit:cover;
+  background:var(--chrome-action-hover);box-shadow:0 0 0 3px #0c0c0e,0 0 0 4px #2b2b31}
+@keyframes hermes-ncm-spin{to{transform:rotate(360deg)}}
+.hermes-ncm-vinyl-big{width:96px;height:96px}
+.hermes-ncm-vinyl-mini{width:28px;height:28px;
+  background:repeating-radial-gradient(circle at 50% 50%,#101013 0 1px,#17171b 1px 1.6px),#0c0c0e}
+.hermes-ncm-vinyl-mini img{left:24%;top:24%;width:52%;height:52%;box-shadow:0 0 0 2px #0c0c0e,0 0 0 3px #2b2b31}
+.hermes-ncm-vinyl-arm{position:absolute;right:-12%;top:-4%;width:58%;height:88%;z-index:4;
+  transform-origin:87% 10%;transition:transform 1s cubic-bezier(.4,0,.2,1);filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
+.hermes-ncm-vinyl-arm[data-playing=true]{transform:rotate(4deg)}
+.hermes-ncm-vinyl-arm[data-playing=false]{transform:rotate(-16deg)}
+@media (prefers-reduced-motion: reduce){.hermes-ncm-vinyl-spin{animation:none}.hermes-ncm-vinyl-arm{transition:none}}
 .hermes-ncm-nowtitle{font-size:13px;color:var(--ui-text-primary);text-align:center;max-width:100%;overflow-wrap:anywhere}
 .hermes-ncm-nowmeta{font-size:11px;color:var(--ui-text-tertiary);text-align:center}
 `
@@ -586,6 +608,18 @@ function MiniWave({ player }) {
     children: [0, 1].map(layer => jsx('span', { className: 'hermes-ncm-wave-layer', children: Array(width * rows).fill('⠀').map((cell, i) => jsx('span', { children: cell }, i)) }, layer)) })
 }
 
+function VinylCover({ pic, playing, arm, size }) {
+  return jsxs('div', { className: `hermes-ncm-vinyl hermes-ncm-vinyl-${size}`, 'data-playing': playing, 'aria-hidden': true, children: [
+    jsx('div', { className: 'hermes-ncm-vinyl-spin', children: pic ? jsx('img', { src: pic, loading: 'lazy', alt: '' }) : null }),
+    arm ? jsx('svg', { className: 'hermes-ncm-vinyl-arm', 'data-playing': playing, viewBox: '0 0 60 80', children: [
+      jsx('path', { d: 'M52 8 L31 37 L23 57', fill: 'none', stroke: '#46464f', 'stroke-width': 3.5, 'stroke-linecap': 'round' }),
+      jsx('path', { d: 'M23 57 L20 65', fill: 'none', stroke: '#5c5c66', 'stroke-width': 5, 'stroke-linecap': 'round' }),
+      jsx('circle', { cx: 31, cy: 37, r: 2.6, fill: '#3b3b44' }),
+      jsx('circle', { cx: 52, cy: 8, r: 6, fill: '#23232a', stroke: '#4c4c56', 'stroke-width': 1.5 })
+    ] }) : null
+  ] })
+}
+
 function SongRow({ player, row, list, index }) {
   const t = usePluginI18n(ID)
   const queue = useValue(player.queue)
@@ -606,7 +640,8 @@ function SongRow({ player, row, list, index }) {
     onClick: () => player.playFrom(list, index),
     onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); player.playFrom(list, index) } },
     children: [
-      row.pic ? jsx('img', { className: 'hermes-ncm-cover', src: row.pic, loading: 'lazy', alt: '' }) : jsx('span', { className: 'hermes-ncm-cover' }),
+      isCurrent ? jsx(VinylCover, { pic: row.pic, playing: status === 'playing', size: 'mini' })
+        : row.pic ? jsx('img', { className: 'hermes-ncm-cover', src: row.pic, loading: 'lazy', alt: '' }) : jsx('span', { className: 'hermes-ncm-cover' }),
       rowText,
       jsx('span', { className: 'hermes-ncm-duration', children: fmt(Math.round((row.duration || 0) / 1000)) }),
       jsx('button', { className: 'hermes-ncm-heart', 'data-on': liked.includes(row.id), 'aria-label': liked.includes(row.id) ? t('unlike') : t('like'),
@@ -931,11 +966,12 @@ function Footer({ player, ctx }) {
 function NowTab({ player, setTab }) {
   const t = usePluginI18n(ID)
   const queue = useValue(player.queue)
+  const status = useValue(player.status)
   const row = player.currentRow()
   if (!row) return jsx('div', { className: 'hermes-ncm-hint', children: t('noPlayingNow') })
   return jsxs('div', { children: [
     jsxs('div', { className: 'hermes-ncm-now', children: [
-      row.pic ? jsx('img', { className: 'hermes-ncm-nowcover', src: row.pic, alt: '' }) : null,
+      jsx(VinylCover, { pic: row.pic, playing: status === 'playing', arm: true, size: 'big' }),
       jsx('div', { className: 'hermes-ncm-nowtitle', children: row.name }),
       row.artists ? jsx('div', { className: 'hermes-ncm-nowmeta', children: row.artists }) : null
     ] }),
