@@ -783,3 +783,66 @@ async def scrobble(request: Request):
         return {"ok": True}
     except Exception:
         return {"ok": False}  # fire-and-forget; never surface scrobble noise
+
+
+# ------------------------------------------------------------- recommend ----
+# 2026-11 probe: legacy v1/recommend/resource is retired (404). Daily picks
+# live on eapi /v3/discovery/recommend/songs; recommended playlists (incl.
+# the official 私人雷达 dynamic list) on v1/discovery/recommend/resource;
+# Personal FM on the legacy radio/get. All three verified live with MUSIC_U.
+
+@router.post("/recommend/daily")
+@router.get("/recommend/daily")
+async def recommend_daily():
+    cookies = _load_cookies()
+    if not cookies.get("MUSIC_U"):
+        return {"ok": False, "error": "login required"}
+    try:
+        res = _eapi("/v3/discovery/recommend/songs", {}, cookies)
+        data = res.get("data") or {}
+        songs = [_song_row(s, s.get("privilege")) for s in data.get("dailySongs") or [] if isinstance(s, dict)]
+        if not songs:
+            return {"ok": False, "error": f"daily empty (code={res.get('code')})"}
+        return {"ok": True, "songs": songs}
+    except Exception as exc:
+        return {"ok": False, "error": f"daily failed: {exc}"}
+
+
+@router.post("/recommend/resource")
+async def recommend_resource():
+    cookies = _load_cookies()
+    if not cookies.get("MUSIC_U"):
+        return {"ok": False, "error": "login required"}
+    try:
+        res = _weapi("v1/discovery/recommend/resource", {}, cookies)
+        cards = []
+        for item in res.get("recommend") or []:
+            if not isinstance(item, dict) or item.get("type") != 1:
+                continue  # phase 1: playlists only
+            creator = item.get("creator")
+            creator = creator.get("nickname", "") if isinstance(creator, dict) else ""
+            cards.append({
+                "id": item.get("id"),
+                "name": item.get("name", ""),
+                "cover": _pic(item.get("picUrl")),
+                "creator": creator or item.get("copywriter") or "",
+                "trackCount": 0,
+            })
+        return {"ok": True, "playlists": cards}
+    except Exception as exc:
+        return {"ok": False, "error": f"resource failed: {exc}"}
+
+
+@router.post("/fm/next")
+async def fm_next():
+    cookies = _load_cookies()
+    if not cookies.get("MUSIC_U"):
+        return {"ok": False, "error": "login required"}
+    try:
+        res = _weapi("v1/radio/get", {}, cookies)
+        songs = [_song_row(s) for s in res.get("data") or [] if isinstance(s, dict)]
+        if not songs:
+            return {"ok": False, "error": f"fm empty (code={res.get('code')})"}
+        return {"ok": True, "songs": songs}
+    except Exception as exc:
+        return {"ok": False, "error": f"fm failed: {exc}"}

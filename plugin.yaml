@@ -1,6 +1,6 @@
 name: netease-cloud
-version: 0.1.0
-description: "NetEase Cloud Music (网易云音乐) mini player in the Hermes Desktop status bar: search songs and playlists, play with lyrics, liked songs, your own playlists, cookie login, loop/single/shuffle modes. Requires a NetEase account; VIP songs need VIP. The login cookie (MUSIC_U) is stored in the plugin's own data directory."
+version: 0.2.0
+description: "NetEase Cloud Music (网易云音乐) mini player in the Hermes Desktop status bar: search songs and playlists, daily/personal recommendations and FM, play with lyrics, liked songs, your own playlists, cookie login, loop/single/shuffle modes. Requires a NetEase account; VIP songs need VIP. The login cookie (MUSIC_U) is stored in the plugin's own data directory."
 author: BoosterCore
 kind: standalone
 requires_hermes: ">=0.21.5"

@@ -21,6 +21,7 @@
 ## 功能一览
 
 - 🔎 **搜索** 单曲与歌单（单曲 / 歌单 双标签）
+- ✨ **推荐页**（需登录）：每日推荐（每天 30 首）、私人 FM、推荐歌单——含官方「私人雷达」
 - ▶️ **播放控制**：播放 / 暂停 / 上一首 / 下一首、进度条、音量（统一镂空细线风格）
 - 📜 **滚动歌词**：自动高亮当前行
 - ❤️ **收藏**：红心 / 取消红心、「喜欢的音乐」歌单
@@ -75,7 +76,7 @@ netease-cloud/
 ├── plugin.yaml            # Hermes 插件清单
 ├── dashboard/
 │   ├── manifest.json      # 后端 API 声明
-│   └── plugin_api.py      # FastAPI 路由：search / url / lyric / login ...
+│   └── plugin_api.py      # FastAPI 路由：search / recommend / url / lyric / login ...
 └── desktop/
     └── plugin.js          # 桌面状态栏 UI（单文件 ESM，@hermes/plugin-sdk）
 ```

@@ -26,6 +26,8 @@ spirit of the built-in Radio plugin.
 ## Features
 
 - 🔎 **Search** songs and playlists (two tabs: Songs / Playlists)
+- ✨ **For You tab** (login required): Daily Recommendations (30 songs),
+  Personal FM, and recommended playlists — including the official Private Radar
 - ▶️ **Playback controls**: play / pause / previous / next, progress bar,
   volume — all in a consistent thin-outline style
 - 📜 **Scrolling synced lyrics** with the current line highlighted
@@ -89,7 +91,7 @@ netease-cloud/
 ├── plugin.yaml            # Hermes plugin manifest
 ├── dashboard/
 │   ├── manifest.json      # backend API declaration
-│   └── plugin_api.py      # FastAPI routes: search / url / lyric / login ...
+│   └── plugin_api.py      # FastAPI routes: search / recommend / url / lyric / login ...
 └── desktop/
     └── plugin.js          # Desktop status-bar UI (single-file ESM, @hermes/plugin-sdk)
 ```

@@ -2328,7 +2328,10 @@ const EN = {
   cookieNmtid: 'That looks like NMTID — click the row named MUSIC_U and copy its value',
   cookieNeed: 'No MUSIC_U found — paste the MUSIC_U value or a full cookie',
   partialCount: total => `total ${total} · first 1000 shown`,
-  tabNow: 'Now playing', modeLoop: 'Playlist loop', modeOne: 'Single loop', modeShuffle: 'Shuffle',
+  tabNow: 'Now playing', tabRec: 'For You', recDaily: 'Daily Recommendations',
+  recDailyHint: '30 songs picked for you, refreshed daily', recFm: 'Personal FM',
+  recFmHint: 'Play the current FM batch', recLists: 'Recommended Playlists', recEmpty: 'Nothing to recommend yet',
+  modeLoop: 'Playlist loop', modeOne: 'Single loop', modeShuffle: 'Shuffle',
   kindSong: 'Songs', kindPlaylist: 'Playlists',
   noPlayingNow: 'Nothing is playing yet — pick a song first'
 }
@@ -2353,7 +2356,10 @@ const LOCALES = {
     cookieNmtid: '你粘的这串像 NMTID——请点 Name 为 MUSIC_U 的那一行，再复制它的值',
     cookieNeed: '没找到 MUSIC_U，直接粘贴 MUSIC_U 的值也可以',
     partialCount: total => `共 ${total} 首 · 显示前 1000`,
-    tabNow: '正在播放', modeLoop: '列表循环', modeOne: '单曲循环', modeShuffle: '随机播放',
+    tabNow: '正在播放', tabRec: '推荐', recDaily: '每日推荐',
+    recDailyHint: '每天 30 首根据你的口味生成', recFm: '私人 FM',
+    recFmHint: '播放电台当前推荐的一批歌曲', recLists: '推荐歌单', recEmpty: '暂无推荐，稍后再试',
+    modeLoop: '列表循环', modeOne: '单曲循环', modeShuffle: '随机播放',
     kindSong: '单曲', kindPlaylist: '歌单',
     noPlayingNow: '当前没有播放，先去挑一首吧'
   }
@@ -2841,6 +2847,65 @@ function PlaylistsTab({ player }) {
     : rows.map(pl => jsx(PlaylistRow, { pl, onOpen: setSelected }, pl.id)) })
 }
 
+function InlineSongs({ player, title, songs, onBack }) {
+  const t = usePluginI18n(ID)
+  return jsxs('div', { children: [
+    jsxs('div', { className: 'hermes-ncm-plhead', children: [
+      jsx(Button, { variant: 'ghost', size: 'micro', onClick: onBack, children: `‹ ${t('back')}` }),
+      jsx('span', { className: 'hermes-ncm-rowtitle', children: title })
+    ] }),
+    jsx('div', { className: 'hermes-ncm-body', children: songs.length ? songs.map((row, i) =>
+      jsx(SongRow, { player, row, list: songs, index: i }, `rec-${row.id}-${i}`))
+      : jsx('div', { className: 'hermes-ncm-hint', children: t('recEmpty') }) })
+  ] })
+}
+
+function RecTab({ player }) {
+  const t = usePluginI18n(ID)
+  const loggedIn = Boolean(useValue(player.account))
+  const [openPl, setOpenPl] = useState(null)
+  const [dailySongs, setDailySongs] = useState(null)
+  const [fmBusy, setFmBusy] = useState(false)
+  const daily = useQuery({ queryKey: [ID, 'rec', 'daily'], queryFn: () => player.post('/recommend/daily', {}),
+    enabled: loggedIn, staleTime: 3600000, retry: false })
+  const res = useQuery({ queryKey: [ID, 'rec', 'res'], queryFn: () => player.post('/recommend/resource', {}),
+    enabled: loggedIn, staleTime: 600000, retry: false })
+  const playFm = async () => {
+    if (fmBusy) return
+    setFmBusy(true)
+    try {
+      const r = await player.post('/fm/next', {})
+      if (r && r.ok && (r.songs || []).length) player.playFrom(r.songs, 0)
+    } finally { setFmBusy(false) }
+  }
+  if (!loggedIn) return jsx('div', { className: 'hermes-ncm-hint', children: t('loginRequired') })
+  if (openPl) return jsx(PlaylistOpen, { player, pl: openPl, onBack: () => setOpenPl(null) })
+  if (dailySongs) return jsx(InlineSongs, { player, title: t('recDaily'), songs: dailySongs, onBack: () => setDailySongs(null) })
+  const cards = res.data?.ok ? res.data.playlists || [] : []
+  const dailyRows = daily.data?.ok ? daily.data.songs || [] : []
+  const loading = daily.isFetching || res.isFetching
+  return jsx('div', { className: 'hermes-ncm-body', children: jsxs('div', { children: [
+    jsxs('div', { className: 'hermes-ncm-row', role: 'button', tabIndex: 0,
+      onClick: () => dailyRows.length && setDailySongs(dailyRows), children: [
+      dailyRows.length && dailyRows[0].pic ? jsx('img', { className: 'hermes-ncm-cover', src: dailyRows[0].pic, loading: 'lazy', alt: '' }) : jsx('span', { className: 'hermes-ncm-cover' }),
+      jsxs('span', { className: 'hermes-ncm-rowmain', children: [
+        jsx('span', { className: 'hermes-ncm-rowtitle', children: jsx('span', { children: t('recDaily') }) }),
+        jsx('span', { className: 'hermes-ncm-rowmeta', children: t('recDailyHint') }) ] }),
+      jsx('span', { className: 'hermes-ncm-duration', children: dailyRows.length ? String(dailyRows.length) : '' }),
+      jsx('span', {}) ] }),
+    jsxs('div', { className: 'hermes-ncm-row', role: 'button', tabIndex: 0, onClick: playFm, 'data-busy': fmBusy, children: [
+      jsx('span', { className: 'hermes-ncm-cover' }),
+      jsxs('span', { className: 'hermes-ncm-rowmain', children: [
+        jsx('span', { className: 'hermes-ncm-rowtitle', children: jsx('span', { children: t('recFm') }) }),
+        jsx('span', { className: 'hermes-ncm-rowmeta', children: t('recFmHint') }) ] }),
+      jsx('span', { className: 'hermes-ncm-duration', children: '' }),
+      jsx('span', {}) ] }),
+    jsx('div', { className: 'hermes-ncm-hint', children: loading && !cards.length ? t('searching') : t('recLists') }),
+    cards.map(pl => jsx(PlaylistRow, { pl, onOpen: setOpenPl }, pl.id)),
+    !loading && res.data && !res.data.ok ? jsx('div', { className: 'hermes-ncm-hint', children: res.data.error || t('loadError') }) : null
+  ] }) })
+}
+
 function AccountTab({ player }) {
   const t = usePluginI18n(ID)
   const client = useQueryClient()
@@ -3009,12 +3074,13 @@ function Panel({ player, ctx }) {
   const t = usePluginI18n(ID)
   const [tab, setTab] = useState(() => player.currentRow() ? 'now' : 'search')
   const showLyric = useValue(player.showLyric)
-  const tabs = [['now', t('tabNow')], ['search', t('tabSearch')], ['liked', t('tabLiked')], ['playlists', t('tabPlaylists')], ['account', t('tabAccount')]]
+  const tabs = [['now', t('tabNow')], ['rec', t('tabRec')], ['search', t('tabSearch')], ['liked', t('tabLiked')], ['playlists', t('tabPlaylists')], ['account', t('tabAccount')]]
   return jsxs('div', { children: [
     showLyric ? jsx(LyricView, { player }) : null,
     showLyric ? null : jsxs('div', { className: 'hermes-ncm-tabs', children: tabs.map(([key, label]) =>
       jsx(Button, { variant: tab === key ? 'secondary' : 'ghost', size: 'micro', onClick: () => setTab(key), children: label }, key)) }),
     showLyric ? null : tab === 'now' ? jsx(NowTab, { player, setTab })
+      : tab === 'rec' ? jsx(RecTab, { player })
       : tab === 'search' ? jsx(SearchTab, { player })
       : tab === 'liked' ? jsx(LikedTab, { player })
       : tab === 'playlists' ? jsx(PlaylistsTab, { player })
@@ -3048,7 +3114,7 @@ function NcmBar({ player, ctx }) {
 export default {
   id: ID,
   name: '网易云音乐',
-  description: 'NetEase Cloud Music in the status bar: search, play, synced lyrics, likes, QR login, playlists.',
+  description: 'NetEase Cloud Music in the status bar: search, recommendations, FM, play, synced lyrics, likes, QR login, playlists.',
   defaultEnabled: false,
   register(ctx) {
     ctx.i18n.register(LOCALES)
