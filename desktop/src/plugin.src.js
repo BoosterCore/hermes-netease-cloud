@@ -226,6 +226,7 @@ function createPlayer(ctx) {
 
   // ---- audio spectrum (drives the status-bar visualiser) -----------------
   let audioCtx = null, analyser = null, visualSource = null, bins = null, visualBroken = false
+  let stalledFrames = 0, silentFrames = 0
   const corsCache = new Map()
   async function corsOk(url) {
     // The analyser mutes a CORS-tainted media element, so only wire it up for
@@ -245,6 +246,11 @@ function createPlayer(ctx) {
   }
   function ensureVisualiser() {
     if (!audio || visualBroken) return
+    document.addEventListener('pointerdown', () => {
+      // Any click is a user gesture — use it to wake a context stuck in
+      // 'suspended' (autoplay policy) so audio through the graph un-mutes.
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
+    }, true)
     try {
       if (!audioCtx) {
         const AC = window.AudioContext || window.webkitAudioContext
@@ -257,8 +263,11 @@ function createPlayer(ctx) {
         visualSource.connect(analyser)
         analyser.connect(audioCtx.destination)
         bins = new Uint8Array(analyser.frequencyBinCount)
+        console.warn('[ncm] visualiser wired, ctx state =', audioCtx.state)
       }
-      if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => {})
+      if (audioCtx.state === 'suspended') audioCtx.resume().then(
+        () => console.warn('[ncm] ctx resumed'),
+        e => console.warn('[ncm] ctx resume rejected:', e && e.name))
     } catch { visualBroken = true }
   }
   function rerouteForCors(clean) {
@@ -268,9 +277,31 @@ function createPlayer(ctx) {
     try { clean ? visualSource.connect(analyser) : visualSource.disconnect() } catch {}
   }
   function readSpectrum() {
-    if (!analyser || !audioCtx || audioCtx.state !== 'running' || !audio || audio.paused) return null
+    if (!analyser || !audio || audio.paused || status.get() !== 'playing') return null
+    if (!audioCtx || audioCtx.state !== 'running') {
+      silentFrames = 0
+      if (++stalledFrames > 60) reviveUnwired()      // ~4s of playing on a dead context
+      return null
+    }
+    stalledFrames = 0
     analyser.getByteFrequencyData(bins)
+    // A tainted element routed through the graph outputs *digital zero* —
+    // 20s of absolute silence while claiming to play means it went deaf.
+    let energy = 0
+    for (let i = 0; i < bins.length; i++) energy += bins[i]
+    if (energy < 3) { if (++silentFrames > 300) reviveUnwired() } else silentFrames = 0
     return bins
+  }
+  function reviveUnwired() {
+    // Last resort, but it guarantees audible playback: rebuild a plain audio
+    // element with no Web Audio routing at all and reload the current track.
+    console.warn('[ncm] visualiser unusable -> rewiring plain audio')
+    visualBroken = true
+    try { visualSource?.disconnect() } catch {}
+    const el = audio
+    if (el) { el.pause(); el.removeAttribute('src'); el.load() }
+    audio = null; analyser = null; visualSource = null
+    void loadTrack()
   }
 
   function ensureAudio() {
@@ -296,6 +327,7 @@ function createPlayer(ctx) {
     element.addEventListener('pause', () => { if (status.get() === 'playing') status.set('paused') })
     element.addEventListener('ended', () => next(true))
     element.addEventListener('error', () => {
+      console.warn('[ncm] audio error code=', element.error && element.error.code, 'crossOrigin=', element.crossOrigin)
       if (element.dataset.ncmRetry !== '1' && element.dataset.ncmOriginal) {
         element.dataset.ncmRetry = '1'
         element.src = element.dataset.ncmOriginal
@@ -335,6 +367,7 @@ function createPlayer(ctx) {
     const element = ensureAudio()
     const playable = result.url.startsWith('http://') ? result.url.replace('http://', 'https://') : result.url
     const clean = await corsOk(playable)
+    console.warn('[ncm] cors probe:', clean)
     if (token !== generation || disposed) return
     element.crossOrigin = clean ? 'anonymous' : null
     rerouteForCors(clean)
@@ -483,13 +516,16 @@ function MiniWave({ player }) {
     const motion = matchMedia('(prefers-reduced-motion: reduce)')
     const dotColumns = width * 2, dotRows = rows * 4
     const heights = new Float32Array(dotColumns)
+    let missFrames = 0, step = 0
     const silent = () => heights.every(h => h <= 0.03)
     paint(0, blank)
     // Loop once, never re-created on status flips — pauses then decay smoothly.
     const loop = createBudgetedLoop(() => {
       if (motion.matches) { paint(1, blank); return }
-      const spectrum = player.status.get() === 'playing' ? player.readSpectrum() : null
+      const playing = player.status.get() === 'playing'
+      const spectrum = playing ? player.readSpectrum() : null
       if (spectrum) {
+        missFrames = 0
         const n = spectrum.length
         for (let x = 0; x < dotColumns; x++) {
           // Stretch the bass-heavy half of the bins across the whole grid so
@@ -501,6 +537,14 @@ function MiniWave({ player }) {
         }
       } else {
         for (let x = 0; x < dotColumns; x++) heights[x] *= 0.7
+        if (playing && ++missFrames > 22) {
+          // Spectrum never arrived (probe failed / visualiser disabled) —
+          // fall back to the classic marquee so the bar still feels alive.
+          const cells = [...blank]
+          cells[Math.floor(step++ / 2) % width] = '⠒'
+          paint(1, cells)
+          return
+        }
         if (silent()) { paint(1, blank); return }
       }
       paint(1, brailleBars(heights, dotColumns, rows))
