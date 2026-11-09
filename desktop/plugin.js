@@ -3281,6 +3281,7 @@ function NcmBar({ player, ctx }) {
       jsx(PopoverContent, { side: 'top', align: 'end', className: 'hermes-ncm-panel', 'aria-label': t('netease'),
         children: jsx(Panel, { player, ctx }) })
     ] }),
+    jsx(Action, { label: t('prev'), icon: ic('SkipBack', '⏮'), onClick: () => player.previous() }),
     jsx(Action, { label: t(playing ? 'pause' : 'play'), icon: playing ? Pause : Play, busy: status === 'loading', onClick: player.toggle }),
     jsx(Action, { label: t('next'), icon: ic('SkipForward', '⏭'), onClick: () => player.next() }),
     row ? jsx(Action, { label: t(isLiked ? 'unlike' : 'like'), icon: ic('Heart', '♥'), pressed: isLiked,
