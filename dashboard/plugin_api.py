@@ -720,6 +720,26 @@ async def playlist_tracks(request: Request):
         return {"ok": False, "error": f"playlist failed: {exc}"}
 
 
+def _liked_playlist_id(cookies: dict) -> int | None:
+    # The "我喜欢的音乐" special playlist (specialType=5). account.likelist is
+    # missing on current nuser/account/get, so fall back to the playlist list.
+    try:
+        acct = (m := _weapi("nuser/account/get", {}, cookies)).get("account") or {}
+        likelist = acct.get("likelist")
+        if isinstance(likelist, dict) and likelist.get("id"):
+            return int(likelist["id"])
+        uid = acct.get("id")
+        if not uid:
+            return None
+        pls = _weapi("user/playlist/v1", {"uid": uid, "limit": 20, "offset": 0}, cookies).get("playlist") or []
+        for p in pls:
+            if p.get("specialType") == 5:
+                return int(p["id"])
+    except Exception:
+        pass
+    return None
+
+
 @router.post("/like")
 async def like(request: Request):
     try:
@@ -730,25 +750,44 @@ async def like(request: Request):
         song_id = int(body.get("id"))
     except (TypeError, ValueError):
         return {"ok": False, "error": "bad id"}
+    want = bool(body.get("like", True))
     cookies = _load_cookies()
     if not cookies.get("MUSIC_U"):
         return {"ok": False, "error": "login required"}
     try:
-        res = _weapi("song/like", {"id": song_id, "like": bool(body.get("like", True))}, cookies)
-        return {"ok": bool(res.get("feedback") or res.get("created") or res.get("closed") is not None)}
+        # 2026-11 probe: song/like wants trackId + string bool ({"id",like:bool} -> 400
+        # 参数错误). Delisted/unlicensed songs answer 401 下架歌曲无法收藏; the known
+        # workaround is forcing them into the liked playlist with the id listed twice
+        # (playlist/manipulate/tracks dedup quirk, UnblockNeteaseMusic trick).
+        code = _weapi("song/like", {"trackId": song_id, "like": "true" if want else "false",
+                                    "time": 0}, cookies).get("code")
+        if want and code != 200:
+            pid = _liked_playlist_id(cookies)
+            if pid:
+                code = _weapi("playlist/manipulate/tracks",
+                              {"pid": pid, "op": "add",
+                               "trackIds": json.dumps([str(song_id), str(song_id)], separators=(",", ":"))},
+                              cookies).get("code")
+        liked_now = song_id in (_weapi("song/like/get", {}, cookies).get("ids") or [])
+        if liked_now == want:
+            return {"ok": True, "liked": liked_now}
+        return {"ok": False, "liked": liked_now, "error": f"like rejected (code={code})"}
     except Exception as exc:
         return {"ok": False, "error": f"like failed: {exc}"}
 
 
 @router.get("/liked")
-async def liked(limit: int = 200):
+async def liked(limit: int = 200, mode: str = ""):
     cookies = _load_cookies()
     if not cookies.get("MUSIC_U"):
         return {"ok": False, "error": "login required"}
     try:
         res = _weapi("song/like/get", {}, cookies)
-        ids = res.get("ids") or []
-        ids = ids[:max(1, min(500, limit))]
+        all_ids = res.get("ids") or []
+        if mode == "ids":
+            # cheap id set for heart-state sync (status bar) — no song details.
+            return {"ok": True, "ids": all_ids, "total": len(all_ids)}
+        ids = all_ids[:max(1, min(500, limit))]
         rows = []
         for i in range(0, len(ids), 100):
             chunk = ids[i:i + 100]

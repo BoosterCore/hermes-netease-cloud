@@ -93,6 +93,9 @@ const CSS = `
 .hermes-ncm-heart{background:none;border:0;cursor:pointer;color:inherit;opacity:.55;padding:2px;border-radius:4px}
 .hermes-ncm-heart:hover{opacity:1}
 .hermes-ncm-heart[data-on=true]{color:#ec4141;opacity:1}
+.hermes-ncm-heart[data-on=true] svg{fill:currentColor}
+.hermes-ncm-barheart[aria-pressed=true]{color:#ec4141}
+.hermes-ncm-barheart[aria-pressed=true] svg{fill:currentColor}
 .hermes-ncm-cookie{flex:1;min-width:0;font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--chrome-action-hover);background:transparent;color:var(--ui-text-primary)}
 .hermes-ncm-back{padding:6px 8px}
 .hermes-ncm-footer{padding:6px 8px 4px;border-top:1px solid var(--chrome-action-hover)}
@@ -143,7 +146,8 @@ const CUSTOM_ICONS = {
     jsx('path', { d: 'M17 14l4 3-4 3', key: 'c' }), jsx('path', { d: 'M3 17h3.4c1.1 0 1.9-.4 2.6-1.2', key: 'd' }),
     jsx('path', { d: 'M14.2 8.7l.4-.5c.9-1.2 1.7-1.2 3-1.2H21', key: 'e' })]),
   Music: svgIcon([jsx('path', { d: 'M9 18V5l11-2v13', key: 'a' }),
-    jsx('circle', { cx: 6, cy: 18, r: 3, key: 'b' }), jsx('circle', { cx: 17, cy: 16, r: 3, key: 'c' })])
+    jsx('circle', { cx: 6, cy: 18, r: 3, key: 'b' }), jsx('circle', { cx: 17, cy: 16, r: 3, key: 'c' })]),
+  Heart: svgIcon([jsx('path', { d: 'M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572', key: 'a' })])
 }
 const ic = (name, glyph) => icons[name] || CUSTOM_ICONS[name]
   || function GlyphFallback() { return jsx('span', { className: 'hermes-ncm-glyph', children: glyph }) }
@@ -360,12 +364,35 @@ function createPlayer(ctx) {
     const ids2 = has ? ids.filter(id => id !== row.id) : [...ids, row.id]
     likedIds.set(ids2)
     ctx.storage.set('local.liked', ids2)
-    if (account.get()) await post('/like', { id: row.id, like: !has })
+    if (account.get()) {
+      const result = await post('/like', { id: row.id, like: !has })
+      if (!result.ok && typeof result.liked !== 'boolean') {
+        likedIds.set(ids)
+        ctx.storage.set('local.liked', ids)
+        error.set(result.error || 'like failed')
+      } else if (typeof result.liked === 'boolean' && result.liked !== !has) {
+        const fixed = result.liked ? ids2 : ids
+        likedIds.set(fixed)
+        ctx.storage.set('local.liked', fixed)
+      }
+    }
+  }
+
+  async function syncLiked() {
+    // Server is the source of truth for heart state; union keeps songs liked
+    // while anonymous in the local set.
+    const result = await rest('/liked?mode=ids')
+    if (result.ok && Array.isArray(result.ids)) {
+      const merged = [...new Set([...likedIds.get(), ...result.ids])]
+      likedIds.set(merged)
+      ctx.storage.set('local.liked', merged)
+    }
   }
 
   async function refreshAccount() {
     const result = await rest('/account')
     account.set(result.ok && result.loggedIn ? result.account : false)
+    if (account.get()) void syncLiked()
     return account.get()
   }
 
@@ -795,8 +822,10 @@ function NcmBar({ player, ctx }) {
   const queue = useValue(player.queue)
   const status = useValue(player.status)
   const open = useValue(player.open)
+  const liked = useValue(player.likedIds)
   const row = queue.list[queue.index]
   const playing = status === 'playing'
+  const isLiked = row ? liked.includes(row.id) : false
   const Play = ic('Play', '▶'), Pause = ic('Pause', '⏸')
   const label = row ? `${row.name}${row.artists ? ` — ${row.artists}` : ''}` : t('idle')
   return jsxs('div', { className: 'hermes-ncm-bar', children: [
@@ -808,7 +837,9 @@ function NcmBar({ player, ctx }) {
         children: jsx(Panel, { player, ctx }) })
     ] }),
     jsx(Action, { label: t(playing ? 'pause' : 'play'), icon: playing ? Pause : Play, busy: status === 'loading', onClick: player.toggle }),
-    jsx(Action, { label: t('next'), icon: ic('SkipForward', '⏭'), onClick: () => player.next() })
+    jsx(Action, { label: t('next'), icon: ic('SkipForward', '⏭'), onClick: () => player.next() }),
+    row ? jsx(Action, { label: t(isLiked ? 'unlike' : 'like'), icon: ic('Heart', '♥'), pressed: isLiked,
+      className: 'hermes-ncm-barheart', onClick: () => void player.toggleLike(row) }) : null
   ] })
 }
 
