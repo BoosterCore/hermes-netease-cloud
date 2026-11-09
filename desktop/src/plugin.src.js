@@ -612,9 +612,9 @@ function VinylCover({ pic, playing, arm, size }) {
   return jsxs('div', { className: `hermes-ncm-vinyl hermes-ncm-vinyl-${size}`, 'data-playing': playing, 'aria-hidden': true, children: [
     jsx('div', { className: 'hermes-ncm-vinyl-spin', children: pic ? jsx('img', { src: pic, loading: 'lazy', alt: '' }) : null }),
     arm ? jsx('svg', { className: 'hermes-ncm-vinyl-arm', 'data-playing': playing, viewBox: '0 0 60 80', children: [
-      jsx('path', { d: 'M52 8 L31 37 L23 57', fill: 'none', stroke: '#46464f', 'stroke-width': 3.5, 'stroke-linecap': 'round' }),
-      jsx('path', { d: 'M23 57 L20 65', fill: 'none', stroke: '#5c5c66', 'stroke-width': 5, 'stroke-linecap': 'round' }),
-      jsx('circle', { cx: 31, cy: 37, r: 2.6, fill: '#3b3b44' }),
+      jsx('path', { d: 'M52 8 L40 36 L23 57', fill: 'none', stroke: '#46464f', 'stroke-width': 3.5, 'stroke-linecap': 'round' }),
+      jsx('path', { d: 'M23 57 L19 65', fill: 'none', stroke: '#5c5c66', 'stroke-width': 5, 'stroke-linecap': 'round' }),
+      jsx('circle', { cx: 40, cy: 36, r: 2.6, fill: '#3b3b44' }),
       jsx('circle', { cx: 52, cy: 8, r: 6, fill: '#23232a', stroke: '#4c4c56', 'stroke-width': 1.5 })
     ] }) : null
   ] })
