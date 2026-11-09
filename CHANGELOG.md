@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 中文版本见 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
 
+## [0.4.0] - 2026-11-09
+
+### Added
+- The status-bar dots now dance to the **real audio spectrum**: the fake scrolling marquee is replaced by a live analyser (Web Audio) wired straight into the playing stream — bass hits punch through the dot grid, pauses decay smoothly.
+- Per-track CORS probe with automatic fallback: if a CDN ever stops sending `Access-Control-Allow-Origin`, playback stays audible and the visualiser quietly steps aside.
+
+### Changed
+- Visualiser loop rebuilt to survive pause/resume/track changes without re-creating the audio graph; AudioContext is closed on plugin dispose.
+
 ## [0.3.0] - 2026-11-09
 
 ### Added
