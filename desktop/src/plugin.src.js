@@ -145,7 +145,7 @@ input[type=range].hermes-ncm-range:hover::-webkit-slider-thumb{background:var(--
 .hermes-ncm-vinyl-arm{position:absolute;right:-12%;top:-4%;width:58%;height:88%;z-index:4;
   transform-origin:87% 10%;transition:transform 1s cubic-bezier(.4,0,.2,1);filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
 .hermes-ncm-vinyl-arm[data-playing=true]{transform:rotate(4deg)}
-.hermes-ncm-vinyl-arm[data-playing=false]{transform:rotate(-16deg)}
+.hermes-ncm-vinyl-arm[data-playing=false]{transform:rotate(-34deg)}
 @media (prefers-reduced-motion: reduce){.hermes-ncm-vinyl-spin{animation:none}.hermes-ncm-vinyl-arm{transition:none}}
 .hermes-ncm-nowtitle{font-size:13px;color:var(--ui-text-primary);text-align:center;max-width:100%;overflow-wrap:anywhere}
 .hermes-ncm-nowmeta{font-size:11px;color:var(--ui-text-tertiary);text-align:center}
