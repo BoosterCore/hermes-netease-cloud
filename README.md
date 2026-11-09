@@ -38,8 +38,8 @@ spirit of the built-in Radio plugin.
 - 🔑 **Login**: QR code **or** paste your `MUSIC_U` cookie (QR login is often
   blocked by NetEase risk control — the cookie is the reliable fallback)
 - 🔁 **Play modes**: list loop / single loop / shuffle
-- 🖥️ **Status bar**: mini controls on the bottom status bar plus a compact
-  popover panel; follows the Hermes theme, no build step
+- 🖥️ **Status bar**: mini controls on the bottom status bar (plus a live audio-spectrum
+  dot visualiser) and a compact popover panel; follows the Hermes theme, no build step
 
 ## Install
 
