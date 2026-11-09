@@ -2827,8 +2827,10 @@ function createPlayer(ctx) {
 function MiniWave({ player }) {
   const status = useValue(player.status)
   const ref = useRef(null)
+  const loopRef = useRef(null)
   const active = status === 'playing'
   const width = 10, rows = 2
+  useEffect(() => { if (active) loopRef.current?.wake() }, [active])
   useEffect(() => {
     const node = ref.current
     if (!node) return
@@ -2876,7 +2878,8 @@ function MiniWave({ player }) {
       paint(1, brailleBars(heights, dotColumns, rows))
     }, { fps: 15, pauseWhenUnfocused: false, idleWhen: () => motion.matches
       || (player.status.get() !== 'playing' && silent()) })
-    return () => { loop.dispose(); motion.removeEventListener?.('change', () => {}) }
+    loopRef.current = loop
+    return () => { loop.dispose(); loopRef.current = null; motion.removeEventListener?.('change', () => {}) }
   }, [])
   return jsx('div', { ref, className: 'hermes-ncm-wave', style: { '--ncm-columns': width }, 'data-active': active, 'aria-hidden': true,
     children: [0, 1].map(layer => jsx('span', { className: 'hermes-ncm-wave-layer', children: Array(width * rows).fill('⠀').map((cell, i) => jsx('span', { children: cell }, i)) }, layer)) })
