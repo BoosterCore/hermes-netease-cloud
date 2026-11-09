@@ -228,16 +228,20 @@ function createPlayer(ctx) {
   let audioCtx = null, analyser = null, visualSource = null, bins = null, visualBroken = false
   let stalledFrames = 0, silentFrames = 0
   const diagEvents = []
-  let diagFlush = 0
+  let diagTimer = 0
+  function flushDiag() {
+    diagTimer = 0
+    if (!diagEvents.length) return
+    const batch = diagEvents.splice(0)
+    void Promise.resolve(post('/diag', { events: batch })).catch(() => {})
+  }
   function diag(tag, detail) {
     // Packaged builds expose no renderer console — ship breadcrumbs to the
     // backend (/diag -> data/viz-diag.json) so breakage is diagnosable offline.
     try {
       diagEvents.push({ t: new Date().toISOString().slice(11, 23), tag, ...(detail || {}) })
-      const now = Date.now()
-      if (diagEvents.length < 6 && now - diagFlush < 1200) return
-      diagFlush = now
-      void Promise.resolve(post('/diag', { events: diagEvents.splice(0) })).catch(() => {})
+      if (diagEvents.length >= 6) flushDiag()
+      else if (!diagTimer) diagTimer = setTimeout(flushDiag, 700)
     } catch { /* diagnostics must never break playback */ }
   }
   const corsCache = new Map()
@@ -282,7 +286,7 @@ function createPlayer(ctx) {
       if (audioCtx.state === 'suspended') audioCtx.resume().then(
         () => diag('ctx-resumed'),
         e => diag('ctx-resume-rejected', { name: e && e.name }))
-    } catch { visualBroken = true }
+    } catch (e) { visualBroken = true; diag('viz-create-failed', { name: e && e.name }) }
   }
   function rerouteForCors(clean) {
     // Visualiser already wired and this track lacks CORS -> detach the source
@@ -290,9 +294,14 @@ function createPlayer(ctx) {
     if (!visualSource || !analyser) return
     try { clean ? visualSource.connect(analyser) : visualSource.disconnect() } catch {}
   }
+  let nullFrames = 0
+  function diagNull(why) {
+    if (++nullFrames % 45 === 1) diag('spec-null', { why, ctx: audioCtx ? audioCtx.state : 'none', hasAnalyser: !!analyser, paused: !!(audio && audio.paused) })
+  }
   function readSpectrum() {
-    if (!analyser || !audio || audio.paused || status.get() !== 'playing') return null
+    if (!analyser || !audio || audio.paused || status.get() !== 'playing') { if (audio && !audio.paused) diagNull(analyser ? 'no-analyser' : 'no-graph'); return null }
     if (!audioCtx || audioCtx.state !== 'running') {
+      diagNull('ctx-' + (audioCtx ? audioCtx.state : 'none'))
       silentFrames = 0
       if (++stalledFrames > 60) reviveUnwired()      // ~4s of playing on a dead context
       return null
@@ -532,7 +541,7 @@ function MiniWave({ player }) {
     const motion = matchMedia('(prefers-reduced-motion: reduce)')
     const dotColumns = width * 2, dotRows = rows * 4
     const heights = new Float32Array(dotColumns)
-    let missFrames = 0, step = 0
+    let missFrames = 0, step = 0, tickN = 0
     const silent = () => heights.every(h => h <= 0.03)
     paint(0, blank)
     // Loop once, never re-created on status flips — pauses then decay smoothly.
@@ -540,6 +549,7 @@ function MiniWave({ player }) {
       if (motion.matches) { paint(1, blank); return }
       const playing = player.status.get() === 'playing'
       const spectrum = playing ? player.readSpectrum() : null
+      if (playing && ++tickN % 110 === 1) player.diag('viz-tick', { hasData: !!spectrum })
       if (spectrum) {
         missFrames = 0
         const n = spectrum.length
