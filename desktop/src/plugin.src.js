@@ -88,7 +88,7 @@ const CSS = `
 .hermes-ncm-bar .ncm-name{max-width:132px;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;text-align:left}
 .hermes-ncm-action{width:20px;height:20px;padding:0;flex-shrink:0}
 .hermes-ncm-glyph{display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1}
-.hermes-ncm-panel{width:360px;max-width:calc(100vw - 24px);--popover-surface:color-mix(in srgb,var(--ui-bg-elevated) 58%,transparent);backdrop-filter:blur(22px) saturate(1.5);-webkit-backdrop-filter:blur(22px) saturate(1.5)}
+.hermes-ncm-panel{width:360px;max-width:calc(100vw - 24px);--popover-surface:color-mix(in srgb,var(--ui-bg-elevated) 62%,transparent);backdrop-filter:blur(12px) saturate(1.25);-webkit-backdrop-filter:blur(12px) saturate(1.25)}
 .hermes-ncm-tabs{display:flex;gap:2px;padding:2px 4px 6px}
 .hermes-ncm-body{max-height:320px;overflow-y:auto;overscroll-behavior:contain}
 .hermes-ncm-hint{padding:14px 10px;font-size:11px;color:var(--ui-text-tertiary);text-align:center}
