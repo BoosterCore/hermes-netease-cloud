@@ -240,7 +240,9 @@ def _aes_ecb_encrypt(data: bytes, key: bytes) -> bytes:
 _EAPI_KEY = b"e82ckenh8dichen8"
 
 
-def _eapi(path: str, payload: dict, cookies: dict | None = None):
+def _eapi(path: str, payload: dict, cookies: dict | None = None, capture: dict | None = None):
+    """POST an eapi request; when `capture` is given, Set-Cookie headers are
+    merged into that dict (login endpoints deliver MUSIC_U this way)."""
     cookies = cookies if cookies is not None else _load_cookies()
     hdr = {
         "osver": "undefined", "deviceId": "undefined", "appver": "8.0.0",
@@ -265,6 +267,8 @@ def _eapi(path: str, payload: dict, cookies: dict | None = None):
             "Cookie": "; ".join(f"{k}={v}" for k, v in hdr.items()),
         })
     with urllib.request.urlopen(req, timeout=12) as resp:
+        if capture is not None:
+            _harvest_set_cookies(resp, capture)
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
@@ -678,6 +682,91 @@ async def logout():
         return {"ok": True}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# --------------------------------------------------------------- SMS login --
+# Phone + SMS captcha login: the eapi transport (client-grade headers) sidesteps
+# the QR wall entirely — the 2026-11-10 live test showed every QR variant dies at
+# the phone-side device-environment check ("检测到当前设备环境异常"), while eapi
+# calls from this machine keep returning 200. /eapi/captcha/sent texts the code,
+# /eapi/login/cell/sms trades it for MUSIC_U (delivered via Set-Cookie and/or a
+# "cookie" string in the JSON body).
+
+_PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+_SMS_ERROR_MSGS = {
+    501: "验证码不正确",
+    502: "验证码已失效，请重新获取",
+    415: "发送太频繁，请稍后再试",
+}
+
+
+@router.post("/sms/send")
+async def sms_send(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    phone = str(body.get("phone") or "").strip().replace(" ", "")
+    if not _PHONE_RE.match(phone):
+        return {"ok": False, "error": "bad-phone"}
+    try:
+        res = _eapi("/captcha/sent", {"cellphone": phone, "ctcode": 86}, cookies={})
+        if res.get("code") == 200:
+            return {"ok": True}
+        return {"ok": False, "code": res.get("code"),
+                "error": _SMS_ERROR_MSGS.get(res.get("code")) or res.get("msg") or res.get("message")
+                or f"发送失败 code={res.get('code')}"}
+    except Exception as exc:
+        return {"ok": False, "error": f"sms send failed: {exc}"}
+
+
+@router.post("/sms/login")
+async def sms_login(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    phone = str(body.get("phone") or "").strip().replace(" ", "")
+    captcha = str(body.get("captcha") or "").strip()
+    if not _PHONE_RE.match(phone):
+        return {"ok": False, "error": "bad-phone"}
+    if not re.fullmatch(r"\d{4,8}", captcha):
+        return {"ok": False, "error": "bad-captcha"}
+    jar: dict = {}
+    try:
+        res = _eapi("/login/cell/sms", {"cellphone": phone, "captcha": captcha, "countrycode": ""},
+                    cookies={}, capture=jar)
+    except Exception as exc:
+        return {"ok": False, "error": f"sms login failed: {exc}"}
+    code = res.get("code")
+    if code != 200:
+        return {"ok": False, "code": code,
+                "error": _SMS_ERROR_MSGS.get(code) or res.get("msg") or res.get("message")
+                or f"登录失败 code={code}"}
+    # MUSIC_U arrives via Set-Cookie and sometimes also as a cookie string in the body
+    body_cookie = res.get("cookie")
+    if isinstance(body_cookie, str) and body_cookie:
+        try:
+            parsed = SimpleCookie(body_cookie)
+            for key, morsel in parsed.items():
+                if morsel.value:
+                    jar[key] = morsel.value
+        except Exception:
+            pass
+    if not jar.get("MUSIC_U"):
+        return {"ok": False, "error": "no-session"}
+    cookies = _load_cookies()
+    for key in ("MUSIC_U", "__csrf", "NMTID", "MUSIC_A", "CSRF_TOKEN", "MUSIC_V"):
+        if jar.get(key):
+            cookies[key] = jar[key]
+    _save_cookies(cookies)
+    try:
+        acct = _weapi("nuser/account/get", {}, cookies)
+        if acct.get("account") or acct.get("profile"):
+            return {"ok": True, **_account_payload(acct)}
+        return {"ok": True, "loggedIn": True}
+    except Exception as exc:
+        return {"ok": True, "loggedIn": True, "error": f"saved, verify failed: {exc}"}
 
 
 # ----------------------------------------------------------- playlists ------
