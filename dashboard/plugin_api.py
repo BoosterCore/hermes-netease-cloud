@@ -685,17 +685,20 @@ async def logout():
 
 
 # --------------------------------------------------------------- SMS login --
-# Phone + SMS captcha login: the eapi transport (client-grade headers) sidesteps
-# the QR wall entirely — the 2026-11-10 live test showed every QR variant dies at
-# the phone-side device-environment check ("检测到当前设备环境异常"), while eapi
-# calls from this machine keep returning 200. /eapi/captcha/sent texts the code,
-# /eapi/login/cell/sms trades it for MUSIC_U (delivered via Set-Cookie and/or a
-# "cookie" string in the JSON body).
+# Phone + SMS captcha login: sidesteps the QR wall entirely — the 2026-11-10 live
+# test showed every QR variant dies at the phone-side device-environment check
+# ("检测到当前设备环境异常"), while plain HTTP calls from this machine keep
+# returning 200. Real (2026) endpoints — eapi/captcha/sent and eapi/login/cell/sms
+# are long dead (接口未找到), as is plain /api/login/cellphone (401 无权限访问. ENC):
+#   POST /api/sms/captcha/sent   {cellphone, ctcode}  -> {code:200, data:true}
+#   POST /api/w/login/cellphone  {cells, captcha}     -> 503 验证码错误 on a wrong
+#       code; 200 + MUSIC_U via Set-Cookie on success.
 
 _PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
 _SMS_ERROR_MSGS = {
     501: "验证码不正确",
     502: "验证码已失效，请重新获取",
+    503: "验证码不正确",
     415: "发送太频繁，请稍后再试",
 }
 
@@ -710,7 +713,8 @@ async def sms_send(request: Request):
     if not _PHONE_RE.match(phone):
         return {"ok": False, "error": "bad-phone"}
     try:
-        res = _eapi("/captcha/sent", {"cellphone": phone, "ctcode": 86}, cookies={})
+        res = _http("https://music.163.com/api/sms/captcha/sent",
+                    {"cellphone": phone, "ctcode": "86"}, cookies={})
         if res.get("code") == 200:
             return {"ok": True}
         return {"ok": False, "code": res.get("code"),
@@ -734,8 +738,11 @@ async def sms_login(request: Request):
         return {"ok": False, "error": "bad-captcha"}
     jar: dict = {}
     try:
-        res = _eapi("/login/cell/sms", {"cellphone": phone, "captcha": captcha, "countrycode": ""},
-                    cookies={}, capture=jar)
+        payload, resp = _http("https://music.163.com/api/w/login/cellphone",
+                              {"phone": phone, "captcha": captcha, "countrycode": ""},
+                              cookies={}, raw=True, response=True)
+        _harvest_set_cookies(resp, jar)
+        res = json.loads(payload.decode("utf-8", "replace"))
     except Exception as exc:
         return {"ok": False, "error": f"sms login failed: {exc}"}
     code = res.get("code")
