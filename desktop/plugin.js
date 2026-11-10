@@ -2318,6 +2318,7 @@ const EN = {
   likedEmpty: 'Tap ♥ on a song to collect it here.', playlistsEmpty: 'No playlists yet.',
   loginRequired: 'Scan-to-login unlocks personal playlists and VIP songs.', login: 'Scan to log in',
   qrWaiting: 'Scan with the NetEase app', qrScanned: 'Confirm on your phone', qrExpired: 'QR expired',
+  qrBlocked: 'NetEase risk control blocked this scan — try another QR, or log in with a cookie', qrSwitch: 'Scan blocked or unresponsive? Try another QR',
   qrRetry: 'Refresh QR', qrCreateError: 'Could not create the QR code', logout: 'Log out', loggedInAs: 'Signed in',
   unplayable: 'Needs VIP or is unavailable in your region', loadError: 'Request failed', notLoggedIn: 'Not signed in',
   vipTag: 'VIP', nowPlaying: 'Now playing', idle: 'NetEase Music', like: 'Like', unlike: 'Unlike',
@@ -2346,6 +2347,7 @@ const LOCALES = {
     likedEmpty: '点歌名右侧的 ♥ 收藏歌曲', playlistsEmpty: '还没有歌单',
     loginRequired: '扫码登录后解锁个人歌单与 VIP 歌曲', login: '扫码登录',
     qrWaiting: '用手机网易云 App 扫码', qrScanned: '请在手机上确认', qrExpired: '二维码已过期',
+    qrBlocked: '网易风控拦截了本次扫码，可点下面换个二维码再试，或改用 Cookie 登录', qrSwitch: '扫码被拦或没反应？换一个二维码',
     qrRetry: '刷新二维码', qrCreateError: '二维码获取失败', logout: '退出登录', loggedInAs: '已登录',
     unplayable: '需要 VIP 或版权受限', loadError: '请求失败', notLoggedIn: '未登录',
     nowPlaying: '正在播放', idle: '网易云音乐', like: '收藏', unlike: '取消收藏',
@@ -3154,19 +3156,20 @@ function AccountTab({ player }) {
         setQr({ phase: 'off' })
         await player.refreshAccount()
         client.invalidateQueries({ queryKey: [ID] })
-      } else if (result.code === 800 || result.error) setQr(state => ({ ...state, phase: 'expired' }))
+      } else if (result.blocked) setQr(state => ({ ...state, phase: 'blocked' }))
+      else if (result.code === 800 || result.error) setQr(state => ({ ...state, phase: 'expired' }))
     }, 2000)
     return () => { stopped = true; clearInterval(timer) }
   }, [qr.phase === 'off', qr.uniid])
 
-  async function create() {
-    setQr({ phase: 'loading' })
-    const result = await player.post('/qr/create', {})
-    if (!result.ok || !result.qrUrl) { setQr({ phase: 'error' }); return }
+  async function create(strategy = 0) {
+    setQr({ phase: 'loading', strategy })
+    const result = await player.post('/qr/create', { strategy })
+    if (!result.ok || !result.qrUrl) { setQr({ phase: 'error', strategy }); return }
     const code = QR(0, 'M')
     code.addData(result.qrUrl)
     code.make()
-    setQr({ phase: 'showing', uniid: result.uniid, image: code.createDataURL(4, 10) })
+    setQr({ phase: 'showing', uniid: result.uniid, image: code.createDataURL(4, 10), strategy })
   }
 
   if (account) return jsxs('div', { className: 'hermes-ncm-account', children: [
@@ -3191,11 +3194,13 @@ function AccountTab({ player }) {
       children: cookieState.error || t('cookieHint') })
   ] })
   if (qr.phase === 'loading') return jsx('div', { className: 'hermes-ncm-account', children: jsx(GlyphSpinner, { ariaLabel: t('login') }) })
-  const label = qr.phase === 'showing' ? t('qrWaiting') : qr.phase === 'scanned' ? t('qrScanned') : qr.phase === 'expired' ? t('qrExpired') : t('qrCreateError')
+  const label = qr.phase === 'showing' ? t('qrWaiting') : qr.phase === 'scanned' ? t('qrScanned') : qr.phase === 'expired' ? t('qrExpired') : qr.phase === 'blocked' ? t('qrBlocked') : t('qrCreateError')
   return jsxs('div', { className: 'hermes-ncm-account', children: [
     qr.image ? jsx('span', { className: 'hermes-ncm-qr', children: jsx('img', { src: qr.image, width: 190, height: 190, alt: t('login') }) }) : null,
-    jsx('div', { className: 'hermes-ncm-status', children: label }),
-    qr.phase !== 'showing' ? jsx(Button, { variant: 'ghost', size: 'micro', onClick: () => void create(), children: t('qrRetry') }) : null
+    jsx('div', { className: 'hermes-ncm-status', style: { whiteSpace: 'normal' }, children: label }),
+    qr.phase === 'showing' || qr.phase === 'scanned'
+      ? jsx(Button, { variant: 'ghost', size: 'micro', onClick: () => void create(((qr.strategy ?? 0) + 1) % 3), children: t('qrSwitch') })
+      : jsx(Button, { variant: 'ghost', size: 'micro', onClick: () => void create(((qr.strategy ?? 0) + 1) % 3), children: t('qrRetry') })
   ] })
 }
 

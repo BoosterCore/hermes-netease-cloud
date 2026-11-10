@@ -454,7 +454,26 @@ async def detail(request: Request):
 # is polled with the SAME attempt-scoped anonymous cookie jar + chain id.
 # Codes: 800 expired, 801 waiting for scan, 802 scanned (awaiting phone confirm,
 # may already carry cookies), 803 confirmed (MUSIC_U arrives via Set-Cookie).
+_QR_BLOCKED_CODES = {-460, -462, 8810, 8821}
+# Strategy ladder: the classic web QR content (music.163.com/login?codekey=) is
+# what the official login page has always used and what the mobile app is most
+# used to; the newer /st/platform/scanlogin deep link runs a device-environment
+# check that often flags third-party clients (「检测到当前设备环境异常」).
+# type=3 is the modern PC-client protocol, type=1 the legacy web one.
+_QR_STRATEGIES = (
+    {"qtype": 3, "link": "classic"},
+    {"qtype": 1, "link": "classic"},
+    {"qtype": 3, "link": "scanlogin"},
+)
 _QR_ATTEMPTS: dict[str, dict] = {}
+
+
+def _qr_url(strategy: dict, key: str, chain_id: str) -> str:
+    if strategy["link"] == "classic":
+        return f"https://music.163.com/login?codekey={key}"
+    return ("https://music.163.com/st/platform/scanlogin?"
+            + urllib.parse.urlencode({"codekey": key, "chainId": chain_id,
+                                      "hdw_device": "web", "hdw_appid": "web", "hitExp": "1"}))
 
 
 def _new_attempt_jar() -> tuple[dict, str]:
@@ -494,22 +513,27 @@ def _qr_request(path: str, payload: dict, jar: dict, chain_id: str, checking: bo
 
 
 @router.post("/qr/create")
-async def qr_create():
+async def qr_create(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    idx = body.get("strategy")
+    idx = idx if isinstance(idx, int) and 0 <= idx < len(_QR_STRATEGIES) else 0
+    strategy = _QR_STRATEGIES[idx]
     try:
         jar, chain_id = _new_attempt_jar()
-        resp = _qr_request("/api/login/qrcode/unikey", {"type": 1, "noCheckToken": True}, jar, chain_id, False)
+        resp = _qr_request("/api/login/qrcode/unikey", {"type": strategy["qtype"]}, jar, chain_id, False)
         _harvest_set_cookies(resp, jar)
         result = json.loads(resp.read().decode("utf-8", "replace"))
         key = result.get("unikey") or result.get("uniKey") or (result.get("data") or {}).get("unikey")
         if result.get("code") != 200 or not key:
             return {"ok": False, "error": f"create failed: code={result.get('code')}"}
-        _QR_ATTEMPTS[key] = {"jar": jar, "chainId": chain_id, "createdAt": time.time()}
+        _QR_ATTEMPTS[key] = {"jar": jar, "chainId": chain_id, "createdAt": time.time(),
+                             "qtype": strategy["qtype"]}
         for stale in [k for k, v in _QR_ATTEMPTS.items() if time.time() - v["createdAt"] > 300]:
             _QR_ATTEMPTS.pop(stale, None)
-        qr_url = ("https://music.163.com/st/platform/scanlogin?"
-                  + urllib.parse.urlencode({"codekey": key, "chainId": chain_id,
-                                            "hdw_device": "web", "hdw_appid": "web", "hitExp": "1"}))
-        return {"ok": True, "uniid": key, "qrUrl": qr_url}
+        return {"ok": True, "uniid": key, "strategy": idx, "qrUrl": _qr_url(strategy, key, chain_id)}
     except Exception as exc:
         return {"ok": False, "error": f"qr create failed: {exc}"}
 
@@ -526,7 +550,7 @@ async def qr_poll(request: Request):
         return {"ok": False, "code": 800, "error": "expired"}
     try:
         resp = _qr_request("/api/login/qrcode/client/login",
-                           {"key": uniid, "type": 1, "noCheckToken": True},
+                           {"key": uniid, "type": attempt.get("qtype", 1)},
                            attempt["jar"], attempt["chainId"], True)
         payload = resp.read().decode("utf-8", "replace")
         try:
@@ -534,6 +558,10 @@ async def qr_poll(request: Request):
         except Exception:
             result = {}
         code = result.get("code")
+        if code in _QR_BLOCKED_CODES:
+            _QR_ATTEMPTS.pop(uniid, None)
+            return {"ok": False, "blocked": True, "code": code,
+                    "error": result.get("msg") or result.get("message") or "risk control"}
         jar = attempt["jar"]
         _harvest_set_cookies(resp, jar)
         # cookie may also arrive inside the JSON body
