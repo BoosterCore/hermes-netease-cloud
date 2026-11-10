@@ -96,6 +96,8 @@ const CSS = `
 .hermes-ncm-row:hover{background:var(--chrome-action-hover)}
 .hermes-ncm-row[data-current=true]{color:var(--ui-accent)}
 .hermes-ncm-cover{width:28px;height:28px;border-radius:4px;object-fit:cover;background:var(--chrome-action-hover)}
+.hermes-ncm-covericon{display:inline-flex;align-items:center;justify-content:center;color:var(--ui-text-tertiary)}
+.hermes-ncm-covericon svg{width:15px;height:15px}
 .hermes-ncm-rowmain{min-width:0}
 .hermes-ncm-rowtitle{display:flex;align-items:center;gap:5px;font-size:12px;color:inherit;min-width:0}
 .hermes-ncm-rowtitle>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -181,7 +183,10 @@ const CUSTOM_ICONS = {
     jsx('path', { d: 'M14.2 8.7l.4-.5c.9-1.2 1.7-1.2 3-1.2H21', key: 'e' })]),
   Music: svgIcon([jsx('path', { d: 'M9 18V5l11-2v13', key: 'a' }),
     jsx('circle', { cx: 6, cy: 18, r: 3, key: 'b' }), jsx('circle', { cx: 17, cy: 16, r: 3, key: 'c' })]),
-  Heart: svgIcon([jsx('path', { d: 'M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572', key: 'a' })])
+  Heart: svgIcon([jsx('path', { d: 'M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572', key: 'a' })]),
+  Radio: svgIcon([jsx('circle', { cx: 12, cy: 12, r: 2, key: 'a' }),
+    jsx('path', { d: 'M8.5 8.5a5 5 0 0 0 0 7', key: 'b' }), jsx('path', { d: 'M15.5 8.5a5 5 0 0 1 0 7', key: 'c' }),
+    jsx('path', { d: 'M5.6 5.6a9 9 0 0 0 0 12.8', key: 'd' }), jsx('path', { d: 'M18.4 5.6a9 9 0 0 1 0 12.8', key: 'e' })])
 }
 const ic = (name, glyph) => icons[name] || CUSTOM_ICONS[name]
   || function GlyphFallback() { return jsx('span', { className: 'hermes-ncm-glyph', children: glyph }) }
@@ -815,7 +820,7 @@ function RecTab({ player }) {
       jsx('span', { className: 'hermes-ncm-duration', children: dailyRows.length ? String(dailyRows.length) : '' }),
       jsx('span', {}) ] }),
     jsxs('div', { className: 'hermes-ncm-row', role: 'button', tabIndex: 0, onClick: playFm, 'data-busy': fmBusy, children: [
-      jsx('span', { className: 'hermes-ncm-cover' }),
+      jsx('span', { className: 'hermes-ncm-cover hermes-ncm-covericon', children: jsx(CUSTOM_ICONS.Radio, {}) }),
       jsxs('span', { className: 'hermes-ncm-rowmain', children: [
         jsx('span', { className: 'hermes-ncm-rowtitle', children: jsx('span', { children: t('recFm') }) }),
         jsx('span', { className: 'hermes-ncm-rowmeta', children: t('recFmHint') }) ] }),
