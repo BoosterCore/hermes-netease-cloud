@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import http.client
 import json
 import random
 import re
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -195,6 +197,50 @@ def _harvest_set_cookies(response, cookies: dict) -> bool:
 
 # -------------------------------------------------------------- requests ----
 
+def _is_transient(exc: Exception) -> bool:
+    """TLS mid-flight resets (UNEXPECTED_EOF_WHILE_READING), dropped sockets and
+    read timeouts from NetEase's LB are routinely transient; HTTPError means the
+    server answered, so it is not retried."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return False
+    if isinstance(exc, urllib.error.URLError):
+        exc = getattr(exc, "reason", None) or exc
+    return isinstance(exc, (ssl.SSLError, ConnectionError, TimeoutError,
+                            http.client.HTTPException))
+
+
+def _urlopen_retry(req, timeout: float, attempts: int = 3):
+    """urlopen + full body read with retry on transient transport failures.
+    Returns (payload_bytes, response); headers stay readable after close()."""
+    last: Exception | None = None
+    for attempt in range(attempts):
+        resp = None
+        try:
+            resp = urllib.request.urlopen(req, timeout=timeout)
+            try:
+                return resp.read(), resp
+            except Exception as exc:  # body read can break even after 200
+                if not _is_transient(exc):
+                    raise
+                last = exc
+        except Exception as exc:
+            if resp is None:
+                if not _is_transient(exc):
+                    raise
+                last = exc
+            else:
+                raise
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        if attempt < attempts - 1:
+            time.sleep(0.5 * (attempt + 1))
+    raise last  # type: ignore[misc]
+
+
 def _http(url: str, data: dict | None = None, cookies: dict | None = None,
           timeout: float = 12.0, raw: bool = False, response=None):
     headers = {
@@ -208,11 +254,10 @@ def _http(url: str, data: dict | None = None, cookies: dict | None = None,
         body = urllib.parse.urlencode(data).encode()
         headers["Content-Type"] = "application/x-www-form-urlencoded"
     req = urllib.request.Request(url, data=body, headers=headers)
-    resp = urllib.request.urlopen(req, timeout=timeout)
+    payload, resp = _urlopen_retry(req, timeout)
     if raw:
-        payload = resp.read()
         return (payload, resp) if response is not None else payload
-    return json.loads(resp.read().decode("utf-8", "replace"))
+    return json.loads(payload.decode("utf-8", "replace"))
 
 
 def _weapi(path: str, payload: dict, cookies: dict | None = None):
@@ -266,10 +311,10 @@ def _eapi(path: str, payload: dict, cookies: dict | None = None, capture: dict |
             "Content-Type": "application/x-www-form-urlencoded",
             "Cookie": "; ".join(f"{k}={v}" for k, v in hdr.items()),
         })
-    with urllib.request.urlopen(req, timeout=12) as resp:
-        if capture is not None:
-            _harvest_set_cookies(resp, capture)
-        return json.loads(resp.read().decode("utf-8", "replace"))
+    payload, resp = _urlopen_retry(req, 12)
+    if capture is not None:
+        _harvest_set_cookies(resp, capture)  # headers stay readable after close()
+    return json.loads(payload.decode("utf-8", "replace"))
 
 
 # ------------------------------------------------------------ normalize -----
