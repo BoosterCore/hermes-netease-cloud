@@ -762,9 +762,11 @@ async def sms_send(request: Request):
                     {"cellphone": phone, "ctcode": "86"}, cookies={})
         if res.get("code") == 200:
             return {"ok": True}
+        data = res.get("data") if isinstance(res.get("data"), dict) else {}
         return {"ok": False, "code": res.get("code"),
                 "error": _SMS_ERROR_MSGS.get(res.get("code")) or res.get("msg") or res.get("message")
-                or f"发送失败 code={res.get('code')}"}
+                or f"发送失败 code={res.get('code')}",
+                "verifyUrl": res.get("redirectUrl") or data.get("verifyUrl") or ""}
     except Exception as exc:
         return {"ok": False, "error": f"sms send failed: {exc}"}
 
@@ -792,9 +794,11 @@ async def sms_login(request: Request):
         return {"ok": False, "error": f"sms login failed: {exc}"}
     code = res.get("code")
     if code != 200:
+        data = res.get("data") if isinstance(res.get("data"), dict) else {}
         return {"ok": False, "code": code,
                 "error": _SMS_ERROR_MSGS.get(code) or res.get("msg") or res.get("message")
-                or f"登录失败 code={code}"}
+                or f"登录失败 code={code}",
+                "verifyUrl": res.get("redirectUrl") or data.get("verifyUrl") or ""}
     # MUSIC_U arrives via Set-Cookie and sometimes also as a cookie string in the body
     body_cookie = res.get("cookie")
     if isinstance(body_cookie, str) and body_cookie:

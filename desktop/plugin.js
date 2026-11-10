@@ -2333,6 +2333,7 @@ const EN = {
   smsSent: 'Code sent — check your text messages', smsBadPhone: 'Enter a valid phone number',
   smsBadCode: 'Enter the code from the text message', smsNoSession: 'Server returned no session — try again',
   smsResend: s => `Resend (${s}s)`,
+  smsVerifyHint: 'Open the link below, finish NetEase security verification in your browser, then retry', smsVerifyBtn: 'Open verify page',
   partialCount: total => `total ${total} · first 1000 shown`,
   tabNow: 'Now playing', tabRec: 'For You', recDaily: 'Daily Recommendations',
   recDailyHint: '30 songs picked for you, refreshed daily', recFm: 'Personal FM',
@@ -2367,6 +2368,7 @@ const LOCALES = {
     smsSent: '验证码已发送，请查看手机短信', smsBadPhone: '请输入正确的手机号',
     smsBadCode: '请输入短信里的验证码', smsNoSession: '服务器没返回登录态，请再试一次',
     smsResend: s => `${s}s 后重发`,
+    smsVerifyHint: '点开下方链接完成网易的安全验证（浏览器里做），回来再点一次登录', smsVerifyBtn: '打开验证页面',
     partialCount: total => `共 ${total} 首 · 显示前 1000`,
     tabNow: '正在播放', tabRec: '推荐', recDaily: '每日推荐',
     recDailyHint: '每天 30 首根据你的口味生成', recFm: '私人 FM',
@@ -3138,6 +3140,7 @@ function SmsForm({ player, phoneRef }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState('') // '' | 'send' | 'login'
   const [msg, setMsg] = useState({ text: '', error: false })
+  const [verifyUrl, setVerifyUrl] = useState('')
   const [deadEnd, setDeadEnd] = useState(0) // resend-until timestamp (ms)
   const [, tick] = useState(0)
   const remaining = Math.max(0, Math.ceil((deadEnd - Date.now()) / 1000))
@@ -3159,8 +3162,8 @@ function SmsForm({ player, phoneRef }) {
     setBusy('send'); setMsg({ text: '', error: false })
     const result = await player.post('/sms/send', { phone: p })
     setBusy('')
-    if (result.ok) { setDeadEnd(Date.now() + 60000); setMsg({ text: t('smsSent'), error: false }) }
-    else setMsg({ text: errText(result.error), error: true })
+    if (result.ok) { setDeadEnd(Date.now() + 60000); setMsg({ text: t('smsSent'), error: false }); setVerifyUrl('') }
+    else { setMsg({ text: errText(result.error), error: true }); setVerifyUrl(result.verifyUrl || '') }
   }
 
   async function login() {
@@ -3176,6 +3179,7 @@ function SmsForm({ player, phoneRef }) {
       return
     }
     setMsg({ text: errText(result.error), error: true })
+    setVerifyUrl(result.verifyUrl || '')
   }
 
   return jsxs('div', { className: 'hermes-ncm-account', style: { gap: 5 }, children: [
@@ -3197,7 +3201,11 @@ function SmsForm({ player, phoneRef }) {
         children: busy === 'login' ? t('smsLogging') : t('smsLogin') })
     ] }),
     msg.text ? jsx('div', { className: msg.error ? 'hermes-ncm-error' : 'hermes-ncm-status',
-      style: { textAlign: 'center', whiteSpace: 'normal' }, children: msg.text }) : null
+      style: { textAlign: 'center', whiteSpace: 'normal' }, children: msg.text }) : null,
+    verifyUrl ? jsxs('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, width: '100%', alignItems: 'center' }, children: [
+      jsx('div', { className: 'hermes-ncm-status', style: { textAlign: 'center', whiteSpace: 'normal' }, children: t('smsVerifyHint') }),
+      jsx(Button, { variant: 'secondary', size: 'micro', onClick: () => window.open(verifyUrl, '_blank'), children: t('smsVerifyBtn') })
+    ] }) : null
   ] })
 }
 
