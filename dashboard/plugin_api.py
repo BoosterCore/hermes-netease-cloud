@@ -546,6 +546,30 @@ def _new_attempt_jar() -> tuple[dict, str]:
     return jar, chain_id
 
 
+def _bootstrap_jar(jar: dict) -> list[str]:
+    """Visit /discover as a cookie-less fresh visitor and keep what the server
+    issues.  /discover and /api/banner return a genuine server-minted NMTID
+    (an anti-fraud id with a server-side record); the other anonymous cookies
+    (_ntes_nnid, JSESSIONID-WYYY, WNMCID) are browser-JS generated, so the
+    random fallbacks match real behaviour.  A self-minted NMTID the server has
+    never heard of is the loudest third-party tell at QR-create time."""
+    issued: list[str] = []
+    try:
+        req = urllib.request.Request("https://music.163.com/discover", headers={
+            "User-Agent": _UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        })
+        payload, resp = _urlopen_retry(req, 12)
+        resp.read()
+        before = dict(jar)
+        _harvest_set_cookies(resp, jar)
+        issued.extend(k for k, v in jar.items() if before.get(k) != v)
+    except Exception:
+        pass
+    return issued
+
+
 def _qr_request(path: str, payload: dict, jar: dict, chain_id: str, checking: bool):
     url = f"https://music.163.com{path}"
     headers = {
@@ -572,6 +596,7 @@ async def qr_create(request: Request):
     strategy = _QR_STRATEGIES[idx]
     try:
         jar, chain_id = _new_attempt_jar()
+        _bootstrap_jar(jar)  # server-issued anonymous cookies first; randoms are fallback
         resp = _qr_request("/api/login/qrcode/unikey", {"type": strategy["qtype"]}, jar, chain_id, False)
         _harvest_set_cookies(resp, jar)
         result = json.loads(resp.read().decode("utf-8", "replace"))
