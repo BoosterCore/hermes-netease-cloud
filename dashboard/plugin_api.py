@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import http.client
 import json
 import random
 import re
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -195,6 +197,50 @@ def _harvest_set_cookies(response, cookies: dict) -> bool:
 
 # -------------------------------------------------------------- requests ----
 
+def _is_transient(exc: Exception) -> bool:
+    """TLS mid-flight resets (UNEXPECTED_EOF_WHILE_READING), dropped sockets and
+    read timeouts from NetEase's LB are routinely transient; HTTPError means the
+    server answered, so it is not retried."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return False
+    if isinstance(exc, urllib.error.URLError):
+        exc = getattr(exc, "reason", None) or exc
+    return isinstance(exc, (ssl.SSLError, ConnectionError, TimeoutError,
+                            http.client.HTTPException))
+
+
+def _urlopen_retry(req, timeout: float, attempts: int = 3):
+    """urlopen + full body read with retry on transient transport failures.
+    Returns (payload_bytes, response); headers stay readable after close()."""
+    last: Exception | None = None
+    for attempt in range(attempts):
+        resp = None
+        try:
+            resp = urllib.request.urlopen(req, timeout=timeout)
+            try:
+                return resp.read(), resp
+            except Exception as exc:  # body read can break even after 200
+                if not _is_transient(exc):
+                    raise
+                last = exc
+        except Exception as exc:
+            if resp is None:
+                if not _is_transient(exc):
+                    raise
+                last = exc
+            else:
+                raise
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        if attempt < attempts - 1:
+            time.sleep(0.5 * (attempt + 1))
+    raise last  # type: ignore[misc]
+
+
 def _http(url: str, data: dict | None = None, cookies: dict | None = None,
           timeout: float = 12.0, raw: bool = False, response=None):
     headers = {
@@ -208,11 +254,10 @@ def _http(url: str, data: dict | None = None, cookies: dict | None = None,
         body = urllib.parse.urlencode(data).encode()
         headers["Content-Type"] = "application/x-www-form-urlencoded"
     req = urllib.request.Request(url, data=body, headers=headers)
-    resp = urllib.request.urlopen(req, timeout=timeout)
+    payload, resp = _urlopen_retry(req, timeout)
     if raw:
-        payload = resp.read()
         return (payload, resp) if response is not None else payload
-    return json.loads(resp.read().decode("utf-8", "replace"))
+    return json.loads(payload.decode("utf-8", "replace"))
 
 
 def _weapi(path: str, payload: dict, cookies: dict | None = None):
@@ -240,7 +285,9 @@ def _aes_ecb_encrypt(data: bytes, key: bytes) -> bytes:
 _EAPI_KEY = b"e82ckenh8dichen8"
 
 
-def _eapi(path: str, payload: dict, cookies: dict | None = None):
+def _eapi(path: str, payload: dict, cookies: dict | None = None, capture: dict | None = None):
+    """POST an eapi request; when `capture` is given, Set-Cookie headers are
+    merged into that dict (login endpoints deliver MUSIC_U this way)."""
     cookies = cookies if cookies is not None else _load_cookies()
     hdr = {
         "osver": "undefined", "deviceId": "undefined", "appver": "8.0.0",
@@ -264,8 +311,10 @@ def _eapi(path: str, payload: dict, cookies: dict | None = None):
             "Content-Type": "application/x-www-form-urlencoded",
             "Cookie": "; ".join(f"{k}={v}" for k, v in hdr.items()),
         })
-    with urllib.request.urlopen(req, timeout=12) as resp:
-        return json.loads(resp.read().decode("utf-8", "replace"))
+    payload, resp = _urlopen_retry(req, 12)
+    if capture is not None:
+        _harvest_set_cookies(resp, capture)  # headers stay readable after close()
+    return json.loads(payload.decode("utf-8", "replace"))
 
 
 # ------------------------------------------------------------ normalize -----
@@ -454,7 +503,26 @@ async def detail(request: Request):
 # is polled with the SAME attempt-scoped anonymous cookie jar + chain id.
 # Codes: 800 expired, 801 waiting for scan, 802 scanned (awaiting phone confirm,
 # may already carry cookies), 803 confirmed (MUSIC_U arrives via Set-Cookie).
+_QR_BLOCKED_CODES = {-460, -462, 8810, 8821}
+# Strategy ladder: the classic web QR content (music.163.com/login?codekey=) is
+# what the official login page has always used and what the mobile app is most
+# used to; the newer /st/platform/scanlogin deep link runs a device-environment
+# check that often flags third-party clients (「检测到当前设备环境异常」).
+# type=3 is the modern PC-client protocol, type=1 the legacy web one.
+_QR_STRATEGIES = (
+    {"qtype": 3, "link": "classic"},
+    {"qtype": 1, "link": "classic"},
+    {"qtype": 3, "link": "scanlogin"},
+)
 _QR_ATTEMPTS: dict[str, dict] = {}
+
+
+def _qr_url(strategy: dict, key: str, chain_id: str) -> str:
+    if strategy["link"] == "classic":
+        return f"https://music.163.com/login?codekey={key}"
+    return ("https://music.163.com/st/platform/scanlogin?"
+            + urllib.parse.urlencode({"codekey": key, "chainId": chain_id,
+                                      "hdw_device": "web", "hdw_appid": "web", "hitExp": "1"}))
 
 
 def _new_attempt_jar() -> tuple[dict, str]:
@@ -478,6 +546,30 @@ def _new_attempt_jar() -> tuple[dict, str]:
     return jar, chain_id
 
 
+def _bootstrap_jar(jar: dict) -> list[str]:
+    """Visit /discover as a cookie-less fresh visitor and keep what the server
+    issues.  /discover and /api/banner return a genuine server-minted NMTID
+    (an anti-fraud id with a server-side record); the other anonymous cookies
+    (_ntes_nnid, JSESSIONID-WYYY, WNMCID) are browser-JS generated, so the
+    random fallbacks match real behaviour.  A self-minted NMTID the server has
+    never heard of is the loudest third-party tell at QR-create time."""
+    issued: list[str] = []
+    try:
+        req = urllib.request.Request("https://music.163.com/discover", headers={
+            "User-Agent": _UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        })
+        payload, resp = _urlopen_retry(req, 12)
+        resp.read()
+        before = dict(jar)
+        _harvest_set_cookies(resp, jar)
+        issued.extend(k for k, v in jar.items() if before.get(k) != v)
+    except Exception:
+        pass
+    return issued
+
+
 def _qr_request(path: str, payload: dict, jar: dict, chain_id: str, checking: bool):
     url = f"https://music.163.com{path}"
     headers = {
@@ -494,22 +586,28 @@ def _qr_request(path: str, payload: dict, jar: dict, chain_id: str, checking: bo
 
 
 @router.post("/qr/create")
-async def qr_create():
+async def qr_create(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    idx = body.get("strategy")
+    idx = idx if isinstance(idx, int) and 0 <= idx < len(_QR_STRATEGIES) else 0
+    strategy = _QR_STRATEGIES[idx]
     try:
         jar, chain_id = _new_attempt_jar()
-        resp = _qr_request("/api/login/qrcode/unikey", {"type": 1, "noCheckToken": True}, jar, chain_id, False)
+        _bootstrap_jar(jar)  # server-issued anonymous cookies first; randoms are fallback
+        resp = _qr_request("/api/login/qrcode/unikey", {"type": strategy["qtype"]}, jar, chain_id, False)
         _harvest_set_cookies(resp, jar)
         result = json.loads(resp.read().decode("utf-8", "replace"))
         key = result.get("unikey") or result.get("uniKey") or (result.get("data") or {}).get("unikey")
         if result.get("code") != 200 or not key:
             return {"ok": False, "error": f"create failed: code={result.get('code')}"}
-        _QR_ATTEMPTS[key] = {"jar": jar, "chainId": chain_id, "createdAt": time.time()}
+        _QR_ATTEMPTS[key] = {"jar": jar, "chainId": chain_id, "createdAt": time.time(),
+                             "qtype": strategy["qtype"]}
         for stale in [k for k, v in _QR_ATTEMPTS.items() if time.time() - v["createdAt"] > 300]:
             _QR_ATTEMPTS.pop(stale, None)
-        qr_url = ("https://music.163.com/st/platform/scanlogin?"
-                  + urllib.parse.urlencode({"codekey": key, "chainId": chain_id,
-                                            "hdw_device": "web", "hdw_appid": "web", "hitExp": "1"}))
-        return {"ok": True, "uniid": key, "qrUrl": qr_url}
+        return {"ok": True, "uniid": key, "strategy": idx, "qrUrl": _qr_url(strategy, key, chain_id)}
     except Exception as exc:
         return {"ok": False, "error": f"qr create failed: {exc}"}
 
@@ -526,7 +624,7 @@ async def qr_poll(request: Request):
         return {"ok": False, "code": 800, "error": "expired"}
     try:
         resp = _qr_request("/api/login/qrcode/client/login",
-                           {"key": uniid, "type": 1, "noCheckToken": True},
+                           {"key": uniid, "type": attempt.get("qtype", 1)},
                            attempt["jar"], attempt["chainId"], True)
         payload = resp.read().decode("utf-8", "replace")
         try:
@@ -534,6 +632,10 @@ async def qr_poll(request: Request):
         except Exception:
             result = {}
         code = result.get("code")
+        if code in _QR_BLOCKED_CODES:
+            _QR_ATTEMPTS.pop(uniid, None)
+            return {"ok": False, "blocked": True, "code": code,
+                    "error": result.get("msg") or result.get("message") or "risk control"}
         jar = attempt["jar"]
         _harvest_set_cookies(resp, jar)
         # cookie may also arrive inside the JSON body
@@ -650,6 +752,102 @@ async def logout():
         return {"ok": True}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# --------------------------------------------------------------- SMS login --
+# Phone + SMS captcha login: sidesteps the QR wall entirely — the 2026-11-10 live
+# test showed every QR variant dies at the phone-side device-environment check
+# ("检测到当前设备环境异常"), while plain HTTP calls from this machine keep
+# returning 200. Real (2026) endpoints — eapi/captcha/sent and eapi/login/cell/sms
+# are long dead (接口未找到), as is plain /api/login/cellphone (401 无权限访问. ENC):
+#   POST /api/sms/captcha/sent   {cellphone, ctcode}  -> {code:200, data:true}
+#   POST /api/w/login/cellphone  {cells, captcha}     -> 503 验证码错误 on a wrong
+#       code; 200 + MUSIC_U via Set-Cookie on success.
+
+_PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+_SMS_ERROR_MSGS = {
+    501: "验证码不正确",
+    502: "验证码已失效，请重新获取",
+    503: "验证码不正确",
+    415: "发送太频繁，请稍后再试",
+}
+
+
+@router.post("/sms/send")
+async def sms_send(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    phone = str(body.get("phone") or "").strip().replace(" ", "")
+    if not _PHONE_RE.match(phone):
+        return {"ok": False, "error": "bad-phone"}
+    try:
+        res = _http("https://music.163.com/api/sms/captcha/sent",
+                    {"cellphone": phone, "ctcode": "86"}, cookies={})
+        if res.get("code") == 200:
+            return {"ok": True}
+        data = res.get("data") if isinstance(res.get("data"), dict) else {}
+        return {"ok": False, "code": res.get("code"),
+                "error": _SMS_ERROR_MSGS.get(res.get("code")) or res.get("msg") or res.get("message")
+                or f"发送失败 code={res.get('code')}",
+                "verifyUrl": res.get("redirectUrl") or data.get("verifyUrl") or ""}
+    except Exception as exc:
+        return {"ok": False, "error": f"sms send failed: {exc}"}
+
+
+@router.post("/sms/login")
+async def sms_login(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    phone = str(body.get("phone") or "").strip().replace(" ", "")
+    captcha = str(body.get("captcha") or "").strip()
+    if not _PHONE_RE.match(phone):
+        return {"ok": False, "error": "bad-phone"}
+    if not re.fullmatch(r"\d{4,8}", captcha):
+        return {"ok": False, "error": "bad-captcha"}
+    jar: dict = {}
+    try:
+        payload, resp = _http("https://music.163.com/api/w/login/cellphone",
+                              {"phone": phone, "captcha": captcha, "countrycode": ""},
+                              cookies={}, raw=True, response=True)
+        _harvest_set_cookies(resp, jar)
+        res = json.loads(payload.decode("utf-8", "replace"))
+    except Exception as exc:
+        return {"ok": False, "error": f"sms login failed: {exc}"}
+    code = res.get("code")
+    if code != 200:
+        data = res.get("data") if isinstance(res.get("data"), dict) else {}
+        return {"ok": False, "code": code,
+                "error": _SMS_ERROR_MSGS.get(code) or res.get("msg") or res.get("message")
+                or f"登录失败 code={code}",
+                "verifyUrl": res.get("redirectUrl") or data.get("verifyUrl") or ""}
+    # MUSIC_U arrives via Set-Cookie and sometimes also as a cookie string in the body
+    body_cookie = res.get("cookie")
+    if isinstance(body_cookie, str) and body_cookie:
+        try:
+            parsed = SimpleCookie(body_cookie)
+            for key, morsel in parsed.items():
+                if morsel.value:
+                    jar[key] = morsel.value
+        except Exception:
+            pass
+    if not jar.get("MUSIC_U"):
+        return {"ok": False, "error": "no-session"}
+    cookies = _load_cookies()
+    for key in ("MUSIC_U", "__csrf", "NMTID", "MUSIC_A", "CSRF_TOKEN", "MUSIC_V"):
+        if jar.get(key):
+            cookies[key] = jar[key]
+    _save_cookies(cookies)
+    try:
+        acct = _weapi("nuser/account/get", {}, cookies)
+        if acct.get("account") or acct.get("profile"):
+            return {"ok": True, **_account_payload(acct)}
+        return {"ok": True, "loggedIn": True}
+    except Exception as exc:
+        return {"ok": True, "loggedIn": True, "error": f"saved, verify failed: {exc}"}
 
 
 # ----------------------------------------------------------- playlists ------

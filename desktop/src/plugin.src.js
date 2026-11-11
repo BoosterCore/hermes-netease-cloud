@@ -19,15 +19,22 @@ const EN = {
   likedEmpty: 'Tap ♥ on a song to collect it here.', playlistsEmpty: 'No playlists yet.',
   loginRequired: 'Scan-to-login unlocks personal playlists and VIP songs.', login: 'Scan to log in',
   qrWaiting: 'Scan with the NetEase app', qrScanned: 'Confirm on your phone', qrExpired: 'QR expired',
+  qrBlocked: 'NetEase risk control blocked this scan — try another QR, or use the SMS-code login below', qrSwitch: 'Scan blocked or unresponsive? Try another QR',
   qrRetry: 'Refresh QR', qrCreateError: 'Could not create the QR code', logout: 'Log out', loggedInAs: 'Signed in',
   unplayable: 'Needs VIP or is unavailable in your region', loadError: 'Request failed', notLoggedIn: 'Not signed in',
   vipTag: 'VIP', nowPlaying: 'Now playing', idle: 'NetEase Music', like: 'Like', unlike: 'Unlike',
   noLyric: 'No lyrics for this song', lyricOn: 'Hide lyrics', localOnly: 'Favorites are local until you sign in',
   cookieImport: 'Use cookie', cookiePlaceholder: 'paste the MUSIC_U value (or a full cookie)',
-  cookieHint: 'QR blocked by risk control? Open music.163.com in a browser, sign in, copy the cookie (F12 → Application → Cookies) and paste it here.',
+  cookieHint: 'Both sign-in methods blocked by risk control? Open music.163.com in a browser, sign in, copy the cookie (F12 → Application → Cookies) and paste it here.',
   cookieInvalid: 'Saved, but the server rejected it — check MUSIC_U', cookieBusy: 'Verifying…',
   cookieNmtid: 'That looks like NMTID — click the row named MUSIC_U and copy its value',
   cookieNeed: 'No MUSIC_U found — paste the MUSIC_U value or a full cookie',
+  smsTitle: 'Or sign in with a phone number + SMS code', smsPhone: 'Phone number', smsCode: 'SMS code',
+  smsSend: 'Send code', smsLogin: 'Log in', smsLogging: 'Signing in…', smsGo: 'Use SMS login instead',
+  smsSent: 'Code sent — check your text messages', smsBadPhone: 'Enter a valid phone number',
+  smsBadCode: 'Enter the code from the text message', smsNoSession: 'Server returned no session — try again',
+  smsResend: s => `Resend (${s}s)`,
+  smsVerifyHint: 'Open the link below, finish NetEase security verification in your browser, then retry', smsVerifyBtn: 'Open verify page',
   partialCount: total => `total ${total} · first 1000 shown`,
   tabNow: 'Now playing', tabRec: 'For You', recDaily: 'Daily Recommendations',
   recDailyHint: '30 songs picked for you, refreshed daily', recFm: 'Personal FM',
@@ -47,15 +54,22 @@ const LOCALES = {
     likedEmpty: '点歌名右侧的 ♥ 收藏歌曲', playlistsEmpty: '还没有歌单',
     loginRequired: '扫码登录后解锁个人歌单与 VIP 歌曲', login: '扫码登录',
     qrWaiting: '用手机网易云 App 扫码', qrScanned: '请在手机上确认', qrExpired: '二维码已过期',
+    qrBlocked: '网易风控拦截了本次扫码，可点下面换个二维码再试，或直接用下方短信验证码登录', qrSwitch: '扫码被拦或没反应？换一个二维码',
     qrRetry: '刷新二维码', qrCreateError: '二维码获取失败', logout: '退出登录', loggedInAs: '已登录',
     unplayable: '需要 VIP 或版权受限', loadError: '请求失败', notLoggedIn: '未登录',
     nowPlaying: '正在播放', idle: '网易云音乐', like: '收藏', unlike: '取消收藏',
     noLyric: '暂无歌词', lyricOn: '收起歌词', localOnly: '未登录时收藏仅保存在本地',
     cookieImport: '用 Cookie 登录', cookiePlaceholder: '粘贴 MUSIC_U 的值（或整串 cookie）',
-    cookieHint: '扫码被风控拦截？用浏览器打开 music.163.com 登录，按 F12 → Application → Cookies，点 Name 为 MUSIC_U 的行，把下面的值粘到这里',
+    cookieHint: '以上两种方式被风控拦截？用浏览器打开 music.163.com 登录，按 F12 → Application → Cookies，点 Name 为 MUSIC_U 的行，把下面的值粘到这里',
     cookieInvalid: '已保存，但服务器不认，请检查 MUSIC_U 是否复制完整', cookieBusy: '验证中…',
     cookieNmtid: '你粘的这串像 NMTID——请点 Name 为 MUSIC_U 的那一行，再复制它的值',
     cookieNeed: '没找到 MUSIC_U，直接粘贴 MUSIC_U 的值也可以',
+    smsTitle: '不想扫码？用手机号 + 短信验证码登录', smsPhone: '手机号', smsCode: '验证码',
+    smsSend: '发送验证码', smsLogin: '登录', smsLogging: '登录中…', smsGo: '改用短信登录',
+    smsSent: '验证码已发送，请查看手机短信', smsBadPhone: '请输入正确的手机号',
+    smsBadCode: '请输入短信里的验证码', smsNoSession: '服务器没返回登录态，请再试一次',
+    smsResend: s => `${s}s 后重发`,
+    smsVerifyHint: '点开下方链接完成网易的安全验证（浏览器里做），回来再点一次登录', smsVerifyBtn: '打开验证页面',
     partialCount: total => `共 ${total} 首 · 显示前 1000`,
     tabNow: '正在播放', tabRec: '推荐', recDaily: '每日推荐',
     recDailyHint: '每天 30 首根据你的口味生成', recFm: '私人 FM',
@@ -76,7 +90,7 @@ const CSS = `
 .hermes-ncm-bar .ncm-name{max-width:132px;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;text-align:left}
 .hermes-ncm-action{width:20px;height:20px;padding:0;flex-shrink:0}
 .hermes-ncm-glyph{display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1}
-.hermes-ncm-panel{width:360px;max-width:calc(100vw - 24px)}
+.hermes-ncm-panel{width:360px;max-width:calc(100vw - 24px);--popover-surface:color-mix(in srgb,var(--ui-bg-elevated) 62%,transparent);backdrop-filter:blur(12px) saturate(1.25);-webkit-backdrop-filter:blur(12px) saturate(1.25)}
 .hermes-ncm-tabs{display:flex;gap:2px;padding:2px 4px 6px}
 .hermes-ncm-body{max-height:320px;overflow-y:auto;overscroll-behavior:contain}
 .hermes-ncm-hint{padding:14px 10px;font-size:11px;color:var(--ui-text-tertiary);text-align:center}
@@ -84,6 +98,8 @@ const CSS = `
 .hermes-ncm-row:hover{background:var(--chrome-action-hover)}
 .hermes-ncm-row[data-current=true]{color:var(--ui-accent)}
 .hermes-ncm-cover{width:28px;height:28px;border-radius:4px;object-fit:cover;background:var(--chrome-action-hover)}
+.hermes-ncm-covericon{display:inline-flex;align-items:center;justify-content:center;color:var(--ui-text-tertiary)}
+.hermes-ncm-covericon svg{width:15px;height:15px}
 .hermes-ncm-rowmain{min-width:0}
 .hermes-ncm-rowtitle{display:flex;align-items:center;gap:5px;font-size:12px;color:inherit;min-width:0}
 .hermes-ncm-rowtitle>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -169,7 +185,10 @@ const CUSTOM_ICONS = {
     jsx('path', { d: 'M14.2 8.7l.4-.5c.9-1.2 1.7-1.2 3-1.2H21', key: 'e' })]),
   Music: svgIcon([jsx('path', { d: 'M9 18V5l11-2v13', key: 'a' }),
     jsx('circle', { cx: 6, cy: 18, r: 3, key: 'b' }), jsx('circle', { cx: 17, cy: 16, r: 3, key: 'c' })]),
-  Heart: svgIcon([jsx('path', { d: 'M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572', key: 'a' })])
+  Heart: svgIcon([jsx('path', { d: 'M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572', key: 'a' })]),
+  Radio: svgIcon([jsx('circle', { cx: 12, cy: 12, r: 2, key: 'a' }),
+    jsx('path', { d: 'M8.5 8.5a5 5 0 0 0 0 7', key: 'b' }), jsx('path', { d: 'M15.5 8.5a5 5 0 0 1 0 7', key: 'c' }),
+    jsx('path', { d: 'M5.6 5.6a9 9 0 0 0 0 12.8', key: 'd' }), jsx('path', { d: 'M18.4 5.6a9 9 0 0 1 0 12.8', key: 'e' })])
 }
 const ic = (name, glyph) => icons[name] || CUSTOM_ICONS[name]
   || function GlyphFallback() { return jsx('span', { className: 'hermes-ncm-glyph', children: glyph }) }
@@ -803,7 +822,7 @@ function RecTab({ player }) {
       jsx('span', { className: 'hermes-ncm-duration', children: dailyRows.length ? String(dailyRows.length) : '' }),
       jsx('span', {}) ] }),
     jsxs('div', { className: 'hermes-ncm-row', role: 'button', tabIndex: 0, onClick: playFm, 'data-busy': fmBusy, children: [
-      jsx('span', { className: 'hermes-ncm-cover' }),
+      jsx('span', { className: 'hermes-ncm-cover hermes-ncm-covericon', children: jsx(CUSTOM_ICONS.Radio, {}) }),
       jsxs('span', { className: 'hermes-ncm-rowmain', children: [
         jsx('span', { className: 'hermes-ncm-rowtitle', children: jsx('span', { children: t('recFm') }) }),
         jsx('span', { className: 'hermes-ncm-rowmeta', children: t('recFmHint') }) ] }),
@@ -815,6 +834,82 @@ function RecTab({ player }) {
   ] }) })
 }
 
+function SmsForm({ player, phoneRef }) {
+  const t = usePluginI18n(ID)
+  const client = useQueryClient()
+  const [phone, setPhone] = useState('')
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState('') // '' | 'send' | 'login'
+  const [msg, setMsg] = useState({ text: '', error: false })
+  const [verifyUrl, setVerifyUrl] = useState('')
+  const [deadEnd, setDeadEnd] = useState(0) // resend-until timestamp (ms)
+  const [, tick] = useState(0)
+  const remaining = Math.max(0, Math.ceil((deadEnd - Date.now()) / 1000))
+  useEffect(() => {
+    if (!deadEnd) return
+    const timer = setInterval(() => {
+      if (deadEnd - Date.now() <= 0) clearInterval(timer)
+      tick(n => n + 1)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [deadEnd])
+  const errText = e => e === 'bad-phone' ? t('smsBadPhone')
+    : e === 'bad-captcha' ? t('smsBadCode')
+    : e === 'no-session' ? t('smsNoSession') : (e || t('loadError'))
+
+  async function send() {
+    const p = phone.trim()
+    if (!/^1[3-9]\d{9}$/.test(p)) { setMsg({ text: t('smsBadPhone'), error: true }); return }
+    setBusy('send'); setMsg({ text: '', error: false })
+    const result = await player.post('/sms/send', { phone: p })
+    setBusy('')
+    if (result.ok) { setDeadEnd(Date.now() + 60000); setMsg({ text: t('smsSent'), error: false }); setVerifyUrl('') }
+    else { setMsg({ text: errText(result.error), error: true }); setVerifyUrl(result.verifyUrl || '') }
+  }
+
+  async function login() {
+    const p = phone.trim(), c = code.trim()
+    if (!/^1[3-9]\d{9}$/.test(p)) { setMsg({ text: t('smsBadPhone'), error: true }); return }
+    if (!c) { setMsg({ text: t('smsBadCode'), error: true }); return }
+    setBusy('login'); setMsg({ text: '', error: false })
+    const result = await player.post('/sms/login', { phone: p, captcha: c })
+    setBusy('')
+    if (result.ok && result.loggedIn) {
+      await player.refreshAccount()
+      client.invalidateQueries({ queryKey: [ID] })
+      return
+    }
+    setMsg({ text: errText(result.error), error: true })
+    setVerifyUrl(result.verifyUrl || '')
+  }
+
+  return jsxs('div', { className: 'hermes-ncm-account', style: { gap: 5 }, children: [
+    jsx('div', { className: 'hermes-ncm-status', style: { whiteSpace: 'normal' }, children: t('smsTitle') }),
+    jsxs('div', { style: { display: 'flex', gap: 4, width: '100%', alignItems: 'center' }, children: [
+      jsx('input', { ref: phoneRef, className: 'hermes-ncm-cookie', value: phone, placeholder: t('smsPhone'),
+        inputMode: 'numeric', maxLength: 11, spellCheck: false,
+        onChange: event => { setPhone(event.target.value.replace(/\D/g, '')); setMsg({ text: '', error: false }) } }),
+      jsx(Button, { variant: 'secondary', size: 'micro', disabled: busy !== '' || remaining > 0,
+        onClick: () => void send(),
+        children: remaining > 0 ? t('smsResend', remaining) : busy === 'send' ? t('cookieBusy') : t('smsSend') })
+    ] }),
+    jsxs('div', { style: { display: 'flex', gap: 4, width: '100%', alignItems: 'center' }, children: [
+      jsx('input', { className: 'hermes-ncm-cookie', value: code, placeholder: t('smsCode'),
+        inputMode: 'numeric', maxLength: 8, spellCheck: false,
+        onChange: event => { setCode(event.target.value.replace(/\D/g, '')); setMsg({ text: '', error: false }) },
+        onKeyDown: event => { if (event.key === 'Enter') void login() } }),
+      jsx(Button, { size: 'micro', disabled: busy !== '' || !phone.trim() || !code.trim(), onClick: () => void login(),
+        children: busy === 'login' ? t('smsLogging') : t('smsLogin') })
+    ] }),
+    msg.text ? jsx('div', { className: msg.error ? 'hermes-ncm-error' : 'hermes-ncm-status',
+      style: { textAlign: 'center', whiteSpace: 'normal' }, children: msg.text }) : null,
+    verifyUrl ? jsxs('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, width: '100%', alignItems: 'center' }, children: [
+      jsx('div', { className: 'hermes-ncm-status', style: { textAlign: 'center', whiteSpace: 'normal' }, children: t('smsVerifyHint') }),
+      jsx(Button, { variant: 'secondary', size: 'micro', onClick: () => window.open(verifyUrl, '_blank'), children: t('smsVerifyBtn') })
+    ] }) : null
+  ] })
+}
+
 function AccountTab({ player }) {
   const t = usePluginI18n(ID)
   const client = useQueryClient()
@@ -824,6 +919,7 @@ function AccountTab({ player }) {
   qrRef.current = qr
   const [cookie, setCookie] = useState('')
   const [cookieState, setCookieState] = useState({ busy: false, error: '' })
+  const smsPhoneRef = useRef(null)
 
   async function importCookie() {
     const value = cookie.trim()
@@ -855,19 +951,20 @@ function AccountTab({ player }) {
         setQr({ phase: 'off' })
         await player.refreshAccount()
         client.invalidateQueries({ queryKey: [ID] })
-      } else if (result.code === 800 || result.error) setQr(state => ({ ...state, phase: 'expired' }))
+      } else if (result.blocked) setQr(state => ({ ...state, phase: 'blocked' }))
+      else if (result.code === 800 || result.error) setQr(state => ({ ...state, phase: 'expired' }))
     }, 2000)
     return () => { stopped = true; clearInterval(timer) }
   }, [qr.phase === 'off', qr.uniid])
 
-  async function create() {
-    setQr({ phase: 'loading' })
-    const result = await player.post('/qr/create', {})
-    if (!result.ok || !result.qrUrl) { setQr({ phase: 'error' }); return }
+  async function create(strategy = 0) {
+    setQr({ phase: 'loading', strategy })
+    const result = await player.post('/qr/create', { strategy })
+    if (!result.ok || !result.qrUrl) { setQr({ phase: 'error', strategy }); return }
     const code = QR(0, 'M')
     code.addData(result.qrUrl)
     code.make()
-    setQr({ phase: 'showing', uniid: result.uniid, image: code.createDataURL(4, 10) })
+    setQr({ phase: 'showing', uniid: result.uniid, image: code.createDataURL(4, 10), strategy })
   }
 
   if (account) return jsxs('div', { className: 'hermes-ncm-account', children: [
@@ -882,6 +979,7 @@ function AccountTab({ player }) {
   if (!account && qr.phase === 'off') return jsxs('div', { className: 'hermes-ncm-account', children: [
     jsx('div', { className: 'hermes-ncm-status', children: t('loginRequired') }),
     jsx(Button, { size: 'micro', onClick: () => void create(), children: t('login') }),
+    jsx(SmsForm, { player, phoneRef: smsPhoneRef }),
     jsxs('div', { style: { display: 'flex', gap: 4, width: '100%', alignItems: 'center' }, children: [
       jsx('input', { className: 'hermes-ncm-cookie', value: cookie, placeholder: t('cookiePlaceholder'), spellCheck: false,
         onChange: event => setCookie(event.target.value), onKeyDown: event => { if (event.key === 'Enter') void importCookie() } }),
@@ -892,11 +990,18 @@ function AccountTab({ player }) {
       children: cookieState.error || t('cookieHint') })
   ] })
   if (qr.phase === 'loading') return jsx('div', { className: 'hermes-ncm-account', children: jsx(GlyphSpinner, { ariaLabel: t('login') }) })
-  const label = qr.phase === 'showing' ? t('qrWaiting') : qr.phase === 'scanned' ? t('qrScanned') : qr.phase === 'expired' ? t('qrExpired') : t('qrCreateError')
+  const label = qr.phase === 'showing' ? t('qrWaiting') : qr.phase === 'scanned' ? t('qrScanned') : qr.phase === 'expired' ? t('qrExpired') : qr.phase === 'blocked' ? t('qrBlocked') : t('qrCreateError')
   return jsxs('div', { className: 'hermes-ncm-account', children: [
     qr.image ? jsx('span', { className: 'hermes-ncm-qr', children: jsx('img', { src: qr.image, width: 190, height: 190, alt: t('login') }) }) : null,
-    jsx('div', { className: 'hermes-ncm-status', children: label }),
-    qr.phase !== 'showing' ? jsx(Button, { variant: 'ghost', size: 'micro', onClick: () => void create(), children: t('qrRetry') }) : null
+    jsx('div', { className: 'hermes-ncm-status', style: { whiteSpace: 'normal' }, children: label }),
+    qr.phase === 'showing' || qr.phase === 'scanned'
+      ? jsx(Button, { variant: 'ghost', size: 'micro', onClick: () => void create(((qr.strategy ?? 0) + 1) % 3), children: t('qrSwitch') })
+      : jsx(Button, { variant: 'ghost', size: 'micro', onClick: () => void create(((qr.strategy ?? 0) + 1) % 3), children: t('qrRetry') }),
+    qr.phase === 'blocked' || qr.phase === 'error' || qr.phase === 'expired'
+      ? jsx(Button, { size: 'micro', onClick: () => { const el = smsPhoneRef.current; if (el) { el.scrollIntoView({ block: 'nearest' }); el.focus() } },
+          children: t('smsGo') })
+      : null,
+    jsx(SmsForm, { player, phoneRef: smsPhoneRef })
   ] })
 }
 
