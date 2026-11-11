@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 中文版本见 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
 
+## [0.5.0] - 2026-11-10
+
+### Added
+- **SMS verification-code login**: sign in with phone number + 6-digit code beside the QR code on the Account tab — official web endpoints, 60s resend cooldown, Chinese/English error hints, and a one-click 打开验证页面 button that opens NetEase's official risk-control verification page when error 8810 / -462 appears.
+- QR login strategy ladder: official classic web QR content + the new type=3 protocol, automatic downgrade when risk-control codes (-462 / -460 / 8810 / 8821) bite, plus a manual QR-swap button in the panel.
+- Blocked-QR guidance now suggests switching to SMS login instead of regenerating codes; the cookie fallback hint covers both methods (以上两种方式被风控拦截？).
+- Frosted-glass panel surface (translucent 62% surface + 12px blur, tuned on real hardware).
+- Banner redrawn from a pure SVG source (`docs/banner.svg` is now authoritative): vinyl record + traced beamed note + articulated tonearm + x-gradient contour field.
+
+### Fixed
+- QR login now bootstraps a **server-minted NMTID** anti-fraud cookie (fresh cookie-less visit to /discover) before creating the code — a self-minted NMTID the server has never seen was the loudest third-party tell for the phone-side "device environment abnormal" check.
+- Personal FM rows show a signal-tower placeholder icon when the track carries no cover (was an empty slot).
+- Transient TLS/transport glitches (SSL EOF bursts from NetEase load balancers) now retry with exponential backoff instead of surfacing as panel errors.
+- SMS endpoints corrected to the live official ones (the eapi captcha/login variants are dead upstream) and the login payload field fixed to `phone`.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added
