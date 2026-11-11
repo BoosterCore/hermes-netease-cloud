@@ -16,8 +16,9 @@ spirit of the built-in Radio plugin.
 > (`MUSIC_U`) is stored in the plugin's own data directory
 > (`data/cookie.json`, git-ignored). "Log out" deletes it. The cookie is sent
 > only to NetEase hosts; it is never passed to any other service. VIP songs
-> stream through this session. QR login may be blocked by NetEase risk
-> control; pasting the `MUSIC_U` cookie is the reliable fallback.
+> stream through this session. QR / SMS sign-in may be blocked by NetEase
+> risk control — the panel then links to NetEase's official verification
+> page, and pasting the `MUSIC_U` cookie remains the reliable fallback.
 >
 > No build step, no Python dependencies beyond what Hermes already ships
 > (FastAPI) — NetEase's weapi/eapi crypto (AES-CBC/ECB + RSA) is implemented
@@ -35,8 +36,9 @@ spirit of the built-in Radio plugin.
   style ♥ toggle) or any song row, plus the "Liked Music" playlist
 - 📁 **My Playlists**: browse your own NetEase playlists and play them
   right inside the panel
-- 🔑 **Login**: QR code **or** paste your `MUSIC_U` cookie (QR login is often
-  blocked by NetEase risk control — the cookie is the reliable fallback)
+- 🔑 **Login**: QR code, phone number + SMS verification code, **or** paste
+  your `MUSIC_U` cookie (if risk control blocks QR/SMS, the panel links to
+  NetEase's official verification page; the cookie is the reliable fallback)
 - 🔁 **Play modes**: list loop / single loop / shuffle
 - 🖥️ **Status bar**: mini controls on the bottom status bar (plus a live audio-spectrum
   dot visualiser) and a compact popover panel; follows the Hermes theme, no build step
@@ -58,9 +60,15 @@ VIP tracks require a logged-in NetEase VIP account.
 
 **Option A · QR code** — open the 账号 (Account) tab and scan with the
 NetEase Cloud Music app. If you see "检测到当前设备环境异常，本次操作已拦截"
-(risk control), use Option B.
+(risk control), try Option B.
 
-**Option B · Cookie (recommended, most reliable)**
+**Option B · SMS verification code** — on the 账号 (Account) tab, enter your
+phone number, tap send, type the 6-digit code. If NetEase answers with
+error 8810 ("网络环境存在安全风险"), click the 打开验证页面 button the panel
+shows, finish the official verification in your browser, and retry about
+24 hours later (avoid repeated retries meanwhile).
+
+**Option C · Cookie (recommended, most reliable)**
 1. Log in to [music.163.com](https://music.163.com) in a desktop browser
 2. Open DevTools (F12) → Application/Storage → Cookies → copy the **value** of
    `MUSIC_U`
@@ -85,7 +93,8 @@ NetEase Cloud Music app. If you see "检测到当前设备环境异常，本次�
 - Playlists load the first 1000 tracks (the panel shows the real total)
 - Audio quality follows your NetEase account (VIP → higher bitrate); the
   plugin requests `exhigh` and falls back to `standard` when unavailable
-- QR login may be blocked by NetEase risk control ("environment anomaly") —
+- QR / SMS sign-in may be blocked by NetEase risk control ("environment
+  anomaly") — complete the official verification page the panel links to, or
   use cookie login instead
 
 ## Repository layout
