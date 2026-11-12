@@ -14,11 +14,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 - Banner redrawn from a pure SVG source (`docs/banner.svg` is now authoritative): vinyl record + traced beamed note + articulated tonearm + x-gradient contour field.
 
 ### Fixed
-- QR login now bootstraps a **server-minted NMTID** anti-fraud cookie (fresh cookie-less visit to /discover) before creating the code — a self-minted NMTID the server has never seen was the loudest third-party tell for the phone-side "device environment abnormal" check.
 - Personal FM rows show a signal-tower placeholder icon when the track carries no cover (was an empty slot).
 - Transient TLS/transport glitches (SSL EOF bursts from NetEase load balancers) now retry with exponential backoff instead of surfacing as panel errors.
 - SMS endpoints corrected to the live official ones (the eapi captcha/login variants are dead upstream) and the login payload field fixed to `phone`.
 
+### Changed
+- Catalog review remediation (pre-listing): QR login runs as a plain client again — the pre-create /discover NMTID warm-up existed to slip past NetEase's risk check and has been removed (SMS login and cookie import remain the fallbacks if QR gets blocked).
+- Delisted / unlicensed songs are no longer force-inserted into the liked playlist; NetEase's own refusal message is shown to the user instead.
+- The 打开验证页面 button only opens `https://*.163.com` URLs taken from NetEase's response.
+- `/diag` caps the stored size of each breadcrumb event.
 ## [0.4.0] - 2026-11-09
 
 ### Added
