@@ -546,30 +546,6 @@ def _new_attempt_jar() -> tuple[dict, str]:
     return jar, chain_id
 
 
-def _bootstrap_jar(jar: dict) -> list[str]:
-    """Visit /discover as a cookie-less fresh visitor and keep what the server
-    issues.  /discover and /api/banner return a genuine server-minted NMTID
-    (an anti-fraud id with a server-side record); the other anonymous cookies
-    (_ntes_nnid, JSESSIONID-WYYY, WNMCID) are browser-JS generated, so the
-    random fallbacks match real behaviour.  A self-minted NMTID the server has
-    never heard of is the loudest third-party tell at QR-create time."""
-    issued: list[str] = []
-    try:
-        req = urllib.request.Request("https://music.163.com/discover", headers={
-            "User-Agent": _UA,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        })
-        payload, resp = _urlopen_retry(req, 12)
-        resp.read()
-        before = dict(jar)
-        _harvest_set_cookies(resp, jar)
-        issued.extend(k for k, v in jar.items() if before.get(k) != v)
-    except Exception:
-        pass
-    return issued
-
-
 def _qr_request(path: str, payload: dict, jar: dict, chain_id: str, checking: bool):
     url = f"https://music.163.com{path}"
     headers = {
@@ -596,7 +572,6 @@ async def qr_create(request: Request):
     strategy = _QR_STRATEGIES[idx]
     try:
         jar, chain_id = _new_attempt_jar()
-        _bootstrap_jar(jar)  # server-issued anonymous cookies first; randoms are fallback
         resp = _qr_request("/api/login/qrcode/unikey", {"type": strategy["qtype"]}, jar, chain_id, False)
         _harvest_set_cookies(resp, jar)
         result = json.loads(resp.read().decode("utf-8", "replace"))
@@ -918,26 +893,6 @@ async def playlist_tracks(request: Request):
         return {"ok": False, "error": f"playlist failed: {exc}"}
 
 
-def _liked_playlist_id(cookies: dict) -> int | None:
-    # The "我喜欢的音乐" special playlist (specialType=5). account.likelist is
-    # missing on current nuser/account/get, so fall back to the playlist list.
-    try:
-        acct = (m := _weapi("nuser/account/get", {}, cookies)).get("account") or {}
-        likelist = acct.get("likelist")
-        if isinstance(likelist, dict) and likelist.get("id"):
-            return int(likelist["id"])
-        uid = acct.get("id")
-        if not uid:
-            return None
-        pls = _weapi("user/playlist/v1", {"uid": uid, "limit": 20, "offset": 0}, cookies).get("playlist") or []
-        for p in pls:
-            if p.get("specialType") == 5:
-                return int(p["id"])
-    except Exception:
-        pass
-    return None
-
-
 @router.post("/like")
 async def like(request: Request):
     try:
@@ -954,22 +909,17 @@ async def like(request: Request):
         return {"ok": False, "error": "login required"}
     try:
         # 2026-11 probe: song/like wants trackId + string bool ({"id",like:bool} -> 400
-        # 参数错误). Delisted/unlicensed songs answer 401 下架歌曲无法收藏; the known
-        # workaround is forcing them into the liked playlist with the id listed twice
-        # (playlist/manipulate/tracks dedup quirk, UnblockNeteaseMusic trick).
-        code = _weapi("song/like", {"trackId": song_id, "like": "true" if want else "false",
-                                    "time": 0}, cookies).get("code")
-        if want and code != 200:
-            pid = _liked_playlist_id(cookies)
-            if pid:
-                code = _weapi("playlist/manipulate/tracks",
-                              {"pid": pid, "op": "add",
-                               "trackIds": json.dumps([str(song_id), str(song_id)], separators=(",", ":"))},
-                              cookies).get("code")
+        # 参数错误). Delisted/unlicensed songs answer 401 下架歌曲无法收藏 — show that
+        # refusal to the user as-is (catalog review: no vendor-check workarounds).
+        res = _weapi("song/like", {"trackId": song_id, "like": "true" if want else "false",
+                                   "time": 0}, cookies)
+        code = res.get("code")
+        refusal = str(res.get("msg") or "").strip()
         liked_now = song_id in (_weapi("song/like/get", {}, cookies).get("ids") or [])
         if liked_now == want:
             return {"ok": True, "liked": liked_now}
-        return {"ok": False, "liked": liked_now, "error": f"like rejected (code={code})"}
+        detail = f": {refusal}" if refusal else ""
+        return {"ok": False, "liked": liked_now, "error": f"like rejected (code={code}{detail})"}
     except Exception as exc:
         return {"ok": False, "error": f"like failed: {exc}"}
 
@@ -1021,7 +971,11 @@ async def diag(request: Request):
             prev = json.loads(path.read_text(encoding="utf-8")).get("events", [])
         except Exception:
             pass
-        merged = (prev + events)[-60:]
+        capped = []
+        for ev in events:
+            s = json.dumps(ev, ensure_ascii=False)
+            capped.append(ev if len(s) <= 600 else {"truncated": s[:600] + "…"})
+        merged = (prev + capped)[-60:]
         path.write_text(
             json.dumps({"updated": time.strftime("%F %T"), "events": merged}, ensure_ascii=False, indent=1),
             encoding="utf-8")

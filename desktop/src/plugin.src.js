@@ -834,6 +834,14 @@ function RecTab({ player }) {
   ] }) })
 }
 
+function safeVerifyUrl(u) {
+  // NetEase hands back a verify URL in risk-control errors; only open official 163.com links.
+  try {
+    const x = new URL(u)
+    return x.protocol === 'https:' && (x.hostname === '163.com' || x.hostname.endsWith('.163.com')) ? x.href : ''
+  } catch { return '' }
+}
+
 function SmsForm({ player, phoneRef }) {
   const t = usePluginI18n(ID)
   const client = useQueryClient()
@@ -905,7 +913,7 @@ function SmsForm({ player, phoneRef }) {
       style: { textAlign: 'center', whiteSpace: 'normal' }, children: msg.text }) : null,
     verifyUrl ? jsxs('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, width: '100%', alignItems: 'center' }, children: [
       jsx('div', { className: 'hermes-ncm-status', style: { textAlign: 'center', whiteSpace: 'normal' }, children: t('smsVerifyHint') }),
-      jsx(Button, { variant: 'secondary', size: 'micro', onClick: () => window.open(verifyUrl, '_blank'), children: t('smsVerifyBtn') })
+      jsx(Button, { variant: 'secondary', size: 'micro', onClick: () => { const u = safeVerifyUrl(verifyUrl); if (u) window.open(u, '_blank') }, children: t('smsVerifyBtn') })
     ] }) : null
   ] })
 }
