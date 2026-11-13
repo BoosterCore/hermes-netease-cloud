@@ -1,5 +1,5 @@
 import {
-  atom, Button, createBudgetedLoop, GlyphSpinner, icons, Popover, PopoverContent, PopoverTrigger,
+  atom, Button, createBudgetedLoop, GlyphSpinner, host, icons, Popover, PopoverContent, PopoverTrigger,
   randomUuid, RowButton, SearchField, STATUSBAR_AREAS, Tip, usePluginI18n,
   useQuery, useQueryClient, useValue
 } from '@hermes/plugin-sdk'
@@ -41,7 +41,12 @@ const EN = {
   recFmHint: 'Play the current FM batch', recLists: 'Recommended Playlists', recEmpty: 'Nothing to recommend yet',
   modeLoop: 'Playlist loop', modeOne: 'Single loop', modeShuffle: 'Shuffle',
   kindSong: 'Songs', kindPlaylist: 'Playlists',
-  noPlayingNow: 'Nothing is playing yet — pick a song first'
+  noPlayingNow: 'Nothing is playing yet — pick a song first',
+  backendMissingShort: 'Backend missing here',
+  backendMissingTitle: name => `Profile "${name}" has no NetEase backend`,
+  backendMissingBody: 'The status-bar player is app-level, but login, playlists and audio links come from a per-profile backend. Install it for this profile, then reopen the panel:',
+  backendMissingRemote: 'Connected to a remote gateway? Run the same command on that host instead.',
+  backendMissingRetry: 'Re-check', backendMissingCopy: 'Copy command', backendMissingCopied: 'Copied'
 }
 const LOCALES = {
   en: EN,
@@ -76,7 +81,12 @@ const LOCALES = {
     recFmHint: '播放电台当前推荐的一批歌曲', recLists: '推荐歌单', recEmpty: '暂无推荐，稍后再试',
     modeLoop: '列表循环', modeOne: '单曲循环', modeShuffle: '随机播放',
     kindSong: '单曲', kindPlaylist: '歌单',
-    noPlayingNow: '当前没有播放，先去挑一首吧'
+    noPlayingNow: '当前没有播放，先去挑一首吧',
+    backendMissingShort: '此 profile 未装后端',
+    backendMissingTitle: name => `当前 profile「${name}」还没有安装网易云后端`,
+    backendMissingBody: '状态栏界面是全局的，但登录、歌单、播放链接来自按 profile 安装的后端。在这个 profile 上装好并重开面板即可：',
+    backendMissingRemote: '如果当前连的是远端网关，请到那台主机上执行同样的命令。',
+    backendMissingRetry: '重新检测', backendMissingCopy: '复制命令', backendMissingCopied: '已复制'
   }
 }
 
@@ -88,6 +98,11 @@ const CSS = `
 .hermes-ncm-wave-layer>span{text-align:center;min-width:0}
 .hermes-ncm-wave[data-active=true]{color:var(--ui-accent);opacity:1}
 .hermes-ncm-bar .ncm-name{max-width:132px;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.hermes-ncm-down{opacity:.6}
+.hermes-ncm-missing{display:flex;flex-direction:column;gap:8px;padding:12px 12px 8px;font-size:12px;color:var(--ui-text-secondary)}
+.hermes-ncm-missingtitle{font-size:13px;color:var(--ui-text-primary)}
+.hermes-ncm-missing code{display:block;padding:8px;border:1px solid var(--ui-stroke-secondary);border-radius:6px;font-family:var(--font-mono,monospace);font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--ui-text-primary)}
+.hermes-ncm-missingrow{display:flex;gap:6px}
 .hermes-ncm-action{width:20px;height:20px;padding:0;flex-shrink:0}
 .hermes-ncm-glyph{display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1}
 .hermes-ncm-panel{width:360px;max-width:calc(100vw - 24px);--popover-surface:color-mix(in srgb,var(--ui-bg-elevated) 62%,transparent);backdrop-filter:blur(12px) saturate(1.25);-webkit-backdrop-filter:blur(12px) saturate(1.25)}
@@ -264,6 +279,25 @@ function createPlayer(ctx) {
     }
   }
   const post = (path, body) => rest(path, { method: 'POST', body: body || {} })
+
+  // Backend availability — the desktop half is app-level and renders even when
+  // the active profile/gateway has no `plugins/netease-cloud` backend mounted.
+  // Probe /health (retry once) and degrade the UI instead of showing a dead player.
+  const backend = atom({ state: 'checking', profile: '' })
+  let probeSeq = 0
+  async function probeBackend() {
+    let profile = 'default'
+    try { profile = String(host.state.profile.get() || 'default') } catch { /* older shells */ }
+    const seq = ++probeSeq
+    backend.set({ state: 'checking', profile })
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await rest('/health')
+      if (seq !== probeSeq) return
+      if (result.ok) { backend.set({ state: 'ok', profile }); return }
+      await new Promise(resolve => setTimeout(resolve, 1200))
+    }
+    if (seq === probeSeq) backend.set({ state: 'missing', profile })
+  }
 
   // ---- audio spectrum (drives the status-bar visualiser) -----------------
   let audioCtx = null, analyser = null, visualSource = null, bins = null, visualBroken = false
@@ -562,7 +596,7 @@ function createPlayer(ctx) {
   })
 
   return { queue, status, error, pos, dur, volume, lyric, likedIds, account, open, showLyric,
-    rest, post, playFrom, next, previous, toggle, seek, setVolume, mute, cycleMode, toggleLike, refreshAccount, currentRow, mode, readSpectrum, diag }
+    rest, post, playFrom, next, previous, toggle, seek, setVolume, mute, cycleMode, toggleLike, refreshAccount, currentRow, mode, readSpectrum, diag, backend, probeBackend }
 }
 
 // ------------------------------------------------------------ components ---
@@ -1093,10 +1127,34 @@ function NowTab({ player, setTab }) {
   ] })
 }
 
+function BackendMissing({ player, ctx }) {
+  const t = usePluginI18n(ID)
+  const backend = useValue(player.backend)
+  const [copied, setCopied] = useState(false)
+  const scope = backend.profile && backend.profile !== 'default' ? `-p ${backend.profile} ` : ''
+  const cmd = `hermes ${scope}plugins install BoosterCore/hermes-netease-cloud && hermes ${scope}plugins enable netease-cloud`
+  return jsxs('div', { className: 'hermes-ncm-missing', children: [
+    jsx('div', { className: 'hermes-ncm-missingtitle', children: t('backendMissingTitle', backend.profile || 'default') }),
+    jsx('div', { children: t('backendMissingBody') }),
+    jsx('code', { children: cmd }),
+    jsx('div', { children: t('backendMissingRemote') }),
+    jsxs('div', { className: 'hermes-ncm-missingrow', children: [
+      jsx(Button, { variant: 'secondary', size: 'micro', onClick: async () => {
+        let done = false
+        try { done = await ctx.os?.writeClipboard?.(cmd) !== false } catch { done = false }
+        if (done) { setCopied(true); setTimeout(() => setCopied(false), 1500) }
+      }, children: t(copied ? 'backendMissingCopied' : 'backendMissingCopy') }),
+      jsx(Button, { variant: 'ghost', size: 'micro', onClick: () => void player.probeBackend(), children: t('backendMissingRetry') })
+    ] })
+  ] })
+}
+
 function Panel({ player, ctx }) {
   const t = usePluginI18n(ID)
   const [tab, setTab] = useState(() => player.currentRow() ? 'now' : 'search')
   const showLyric = useValue(player.showLyric)
+  const backend = useValue(player.backend)
+  if (backend.state === 'missing') return jsxs('div', { children: [jsx(BackendMissing, { player, ctx }), jsx(Footer, { player, ctx })] })
   const tabs = [['now', t('tabNow')], ['rec', t('tabRec')], ['search', t('tabSearch')], ['liked', t('tabLiked')], ['playlists', t('tabPlaylists')], ['account', t('tabAccount')]]
   return jsxs('div', { children: [
     showLyric ? jsx(LyricView, { player }) : null,
@@ -1118,12 +1176,15 @@ function NcmBar({ player, ctx }) {
   const status = useValue(player.status)
   const open = useValue(player.open)
   const liked = useValue(player.likedIds)
+  const backend = useValue(player.backend)
+  useEffect(() => { if (open) void player.probeBackend() }, [open])
+  const missing = backend.state === 'missing'
   const row = queue.list[queue.index]
   const playing = status === 'playing'
   const isLiked = row ? liked.includes(row.id) : false
   const Play = ic('Play', '▶'), Pause = ic('Pause', '⏸')
-  const label = row ? `${row.name}${row.artists ? ` — ${row.artists}` : ''}` : t('idle')
-  return jsxs('div', { className: 'hermes-ncm-bar', children: [
+  const label = missing ? t('backendMissingShort') : row ? `${row.name}${row.artists ? ` — ${row.artists}` : ''}` : t('idle')
+  return jsxs('div', { className: `hermes-ncm-bar${missing ? ' hermes-ncm-down' : ''}`, children: [
     jsx(MiniWave, { player }),
     jsxs(Popover, { open, onOpenChange: value => player.open.set(value), children: [
       jsx(PopoverTrigger, { asChild: true, children: jsx(Button, { variant: 'ghost', size: 'micro',
@@ -1131,11 +1192,13 @@ function NcmBar({ player, ctx }) {
       jsx(PopoverContent, { side: 'top', align: 'end', className: 'hermes-ncm-panel', 'aria-label': t('netease'),
         children: jsx(Panel, { player, ctx }) })
     ] }),
-    jsx(Action, { label: t('prev'), icon: ic('SkipBack', '⏮'), onClick: () => player.previous() }),
-    jsx(Action, { label: t(playing ? 'pause' : 'play'), icon: playing ? Pause : Play, busy: status === 'loading', onClick: player.toggle }),
-    jsx(Action, { label: t('next'), icon: ic('SkipForward', '⏭'), onClick: () => player.next() }),
-    row ? jsx(Action, { label: t(isLiked ? 'unlike' : 'like'), icon: ic('Heart', '♥'), pressed: isLiked,
-      className: 'hermes-ncm-barheart', onClick: () => void player.toggleLike(row) }) : null
+    ...(missing ? [] : [
+      jsx(Action, { label: t('prev'), icon: ic('SkipBack', '⏮'), onClick: () => player.previous() }),
+      jsx(Action, { label: t(playing ? 'pause' : 'play'), icon: playing ? Pause : Play, busy: status === 'loading', onClick: player.toggle }),
+      jsx(Action, { label: t('next'), icon: ic('SkipForward', '⏭'), onClick: () => player.next() }),
+      row ? jsx(Action, { label: t(isLiked ? 'unlike' : 'like'), icon: ic('Heart', '♥'), pressed: isLiked,
+        className: 'hermes-ncm-barheart', onClick: () => void player.toggleLike(row) }) : null
+    ])
   ] })
 }
 
@@ -1151,7 +1214,11 @@ export default {
     document.head.append(style)
     ctx.onDispose(() => style.remove())
     const player = createPlayer(ctx)
+    void player.probeBackend()
     void player.refreshAccount()
+    let unsubProfile = null
+    try { unsubProfile = host.state.profile.subscribe(() => void player.probeBackend()) } catch { /* older shells */ }
+    ctx.onDispose(() => { try { unsubProfile?.() } catch { /* already gone */ } })
     ctx.register({ id: 'player', area: STATUSBAR_AREAS.right, order: 11, render: () => jsx(NcmBar, { player, ctx }) })
   }
 }
